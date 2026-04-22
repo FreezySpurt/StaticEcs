@@ -135,6 +135,7 @@ namespace FFS.Libraries.StaticEcs {
 
             Data.Instance = new Data(worldConfig);
             Data.Handle = WorldHandle.Create<TWorld>();
+            ResourcesData<TWorld>.Create();
             Serializer.Create();
         }
 
@@ -160,107 +161,6 @@ namespace FFS.Libraries.StaticEcs {
             var chunksCapacity = baseEntitiesCapacity >> Const.ENTITIES_IN_CHUNK_SHIFT;
             Data.Instance.InitializeInternal(chunksCapacity);
             Data.Instance.RegisterClusterInternal(default);
-        }
-
-        /// <summary>
-        /// Initializes the world by restoring GID (Global ID) metadata from a binary snapshot.
-        /// This restores the entity slot versions and cluster assignments so that previously
-        /// serialized <see cref="EntityGID"/> references can be resolved correctly.
-        /// The world transitions to <see cref="WorldStatus.Initialized"/> upon completion.
-        /// <para>
-        /// Use this when you need to reconstruct the entity ID mapping table without loading
-        /// full entity/component data.
-        /// </para>
-        /// </summary>
-        /// <param name="reader">A <see cref="BinaryPackReader"/> positioned at the start of the GID store snapshot data.</param>
-        public static void InitializeFromGIDStoreSnapshot(BinaryPackReader reader) {
-            #if FFS_ECS_DEBUG
-            AssertWorldIsCreated(WorldTypeName);
-            #endif
-
-            Serializer.RestoreFromGIDStoreSnapshot(reader);
-            Data.Instance.WorldStatus = WorldStatus.Initialized;
-        }
-
-        /// <summary>
-        /// Initializes the world by restoring GID metadata from a byte array snapshot.
-        /// See <see cref="InitializeFromGIDStoreSnapshot(BinaryPackReader)"/> for semantics.
-        /// </summary>
-        /// <param name="snapshot">Byte array containing the serialized GID store data.</param>
-        /// <param name="gzip">If <c>true</c>, the data is gzip-compressed and will be decompressed before reading.</param>
-        public static void InitializeFromGIDStoreSnapshot(byte[] snapshot, bool gzip = false) {
-            #if FFS_ECS_DEBUG
-            AssertWorldIsCreated(WorldTypeName);
-            #endif
-
-            Serializer.RestoreFromGIDStoreSnapshot(snapshot, gzip);
-            Data.Instance.WorldStatus = WorldStatus.Initialized;
-        }
-
-        /// <summary>
-        /// Initializes the world by restoring GID metadata from a file on disk.
-        /// See <see cref="InitializeFromGIDStoreSnapshot(BinaryPackReader)"/> for semantics.
-        /// </summary>
-        /// <param name="worldSnapshotFilePath">Path to the snapshot file.</param>
-        /// <param name="gzip">If <c>true</c>, the file is gzip-compressed.</param>
-        /// <param name="byteSizeHint">Optional hint for the initial read buffer size (0 = auto).</param>
-        public static void InitializeFromGIDStoreSnapshot(string worldSnapshotFilePath, bool gzip = false, uint byteSizeHint = 0) {
-            #if FFS_ECS_DEBUG
-            AssertWorldIsCreated(WorldTypeName);
-            #endif
-
-            Serializer.RestoreFromGIDStoreSnapshot(worldSnapshotFilePath, gzip, byteSizeHint);
-            Data.Instance.WorldStatus = WorldStatus.Initialized;
-        }
-
-        /// <summary>
-        /// Initializes the world by loading a full world snapshot (entities, components, tags,
-        /// and all associated data) from a binary reader. This is a complete restore — after this
-        /// call the world is in the exact state it was when the snapshot was taken.
-        /// The world transitions to <see cref="WorldStatus.Initialized"/> upon completion.
-        /// <para>
-        /// Use this for save/load functionality where you need to restore the entire game state.
-        /// </para>
-        /// </summary>
-        /// <param name="reader">A <see cref="BinaryPackReader"/> positioned at the start of the world snapshot data.</param>
-        public static void InitializeFromWorldSnapshot(BinaryPackReader reader) {
-            #if FFS_ECS_DEBUG
-            AssertWorldIsCreated(WorldTypeName);
-            #endif
-
-            Serializer.LoadWorldSnapshot(reader);
-            Data.Instance.WorldStatus = WorldStatus.Initialized;
-        }
-
-        /// <summary>
-        /// Initializes the world by loading a full world snapshot from a byte array.
-        /// See <see cref="InitializeFromWorldSnapshot(BinaryPackReader)"/> for semantics.
-        /// </summary>
-        /// <param name="snapshot">Byte array containing the serialized world data.</param>
-        /// <param name="gzip">If <c>true</c>, the data is gzip-compressed and will be decompressed before reading.</param>
-        public static void InitializeFromWorldSnapshot(byte[] snapshot, bool gzip = false) {
-            #if FFS_ECS_DEBUG
-            AssertWorldIsCreated(WorldTypeName);
-            #endif
-
-            Serializer.LoadWorldSnapshot(snapshot, gzip);
-            Data.Instance.WorldStatus = WorldStatus.Initialized;
-        }
-
-        /// <summary>
-        /// Initializes the world by loading a full world snapshot from a file on disk.
-        /// See <see cref="InitializeFromWorldSnapshot(BinaryPackReader)"/> for semantics.
-        /// </summary>
-        /// <param name="worldSnapshotFilePath">Path to the snapshot file.</param>
-        /// <param name="gzip">If <c>true</c>, the file is gzip-compressed.</param>
-        /// <param name="byteSizeHint">Optional hint for the initial read buffer size (0 = auto).</param>
-        public static void InitializeFromWorldSnapshot(string worldSnapshotFilePath, bool gzip = false, uint byteSizeHint = 0) {
-            #if FFS_ECS_DEBUG
-            AssertWorldIsCreated(WorldTypeName);
-            #endif
-
-            Serializer.LoadWorldSnapshot(worldSnapshotFilePath, gzip, byteSizeHint);
-            Data.Instance.WorldStatus = WorldStatus.Initialized;
         }
 
         /// <summary>
@@ -292,8 +192,8 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             Data.Instance.DestroyInternal();
-            ResourcesData.Instance.Clear();
-            NamedResources.Clear();
+            ResourcesData<TWorld>.Instance.Clear();
+            NamedResources<TWorld>.Clear();
             Serializer.DestroySerializer();
 
             Data.Instance.WorldStatus = WorldStatus.NotCreated;
@@ -830,11 +730,11 @@ namespace FFS.Libraries.StaticEcs {
         /// so resources can be set up before initialization and queried at any time.
         /// </para>
         /// </summary>
-        /// <typeparam name="TResource">The resource type to check for. Can be any type (no interface constraint).</typeparam>
+        /// <typeparam name="TResource">The resource type to check for. Must implement <see cref="IResource"/>.</typeparam>
         /// <returns><c>true</c> if a resource of this type has been set.</returns>
         [MethodImpl(AggressiveInlining)]
-        public static bool HasResource<TResource>() {
-            return Resources<TResource>.Has();
+        public static bool HasResource<TResource>() where TResource : IResource {
+            return Resources<TWorld, TResource>.Has();
         }
 
         /// <summary>
@@ -845,8 +745,8 @@ namespace FFS.Libraries.StaticEcs {
         /// <param name="key">String key identifying the resource.</param>
         /// <returns><c>true</c> if a resource with this key exists.</returns>
         [MethodImpl(AggressiveInlining)]
-        public static bool HasResource<TResource>(string key) {
-            return NamedResources.Has(key);
+        public static bool HasResource<TResource>(string key) where TResource : IResource {
+            return NamedResources<TWorld>.Has(key);
         }
 
         /// <summary>
@@ -860,8 +760,8 @@ namespace FFS.Libraries.StaticEcs {
         /// <typeparam name="TResource">The resource type.</typeparam>
         /// <returns>A mutable reference to the stored resource value.</returns>
         [MethodImpl(AggressiveInlining)]
-        public static ref TResource GetResource<TResource>() {
-            return ref Resources<TResource>.Value;
+        public static ref TResource GetResource<TResource>() where TResource : IResource {
+            return ref Resources<TWorld, TResource>.Value;
         }
 
         /// <summary>
@@ -871,8 +771,8 @@ namespace FFS.Libraries.StaticEcs {
         /// <param name="key">String key identifying the resource.</param>
         /// <returns>A mutable reference to the stored resource value.</returns>
         [MethodImpl(AggressiveInlining)]
-        public static ref TResource GetResource<TResource>(string key) {
-            return ref NamedResources.Get<TResource>(key);
+        public static ref TResource GetResource<TResource>(string key) where TResource : IResource {
+            return ref NamedResources<TWorld>.Get<TResource>(key);
         }
 
         /// <summary>
@@ -880,7 +780,7 @@ namespace FFS.Libraries.StaticEcs {
         /// Resources are world-scoped singletons ideal for shared state like configuration,
         /// time data, input state, or service references.
         /// </summary>
-        /// <typeparam name="TResource">The resource type. Can be any type — no interface constraint required.</typeparam>
+        /// <typeparam name="TResource">The resource type. Must implement <see cref="IResource"/>.</typeparam>
         /// <param name="value">The resource value to store.</param>
         /// <param name="clearOnDestroy">
         /// If <c>true</c> (default), the resource is automatically cleared when the world is destroyed.
@@ -889,8 +789,8 @@ namespace FFS.Libraries.StaticEcs {
         /// the original <paramref name="clearOnDestroy"/> setting.
         /// </param>
         [MethodImpl(AggressiveInlining)]
-        public static void SetResource<TResource>(TResource value, bool clearOnDestroy = true) {
-            Resources<TResource>.Set(value, clearOnDestroy);
+        public static void SetResource<TResource>(TResource value, bool clearOnDestroy = true) where TResource : IResource {
+            Resources<TWorld, TResource>.Set(value, clearOnDestroy);
         }
 
         /// <summary>
@@ -902,8 +802,8 @@ namespace FFS.Libraries.StaticEcs {
         /// <param name="value">The resource value to store.</param>
         /// <param name="clearOnDestroy">If <c>true</c>, cleared on world destroy.</param>
         [MethodImpl(AggressiveInlining)]
-        public static void SetResource<TResource>(string key, TResource value, bool clearOnDestroy = true) {
-            NamedResources.Set(key, value, clearOnDestroy);
+        public static void SetResource<TResource>(string key, TResource value, bool clearOnDestroy = true) where TResource : IResource {
+            NamedResources<TWorld>.Set(key, value, clearOnDestroy);
         }
 
         /// <summary>
@@ -911,8 +811,8 @@ namespace FFS.Libraries.StaticEcs {
         /// </summary>
         /// <typeparam name="TResource">The resource type to remove.</typeparam>
         [MethodImpl(AggressiveInlining)]
-        public static void RemoveResource<TResource>() {
-            Resources<TResource>.Remove();
+        public static void RemoveResource<TResource>() where TResource : IResource {
+            Resources<TWorld, TResource>.Remove();
         }
 
         /// <summary>
@@ -921,7 +821,7 @@ namespace FFS.Libraries.StaticEcs {
         /// <param name="key">String key of the resource to remove.</param>
         [MethodImpl(AggressiveInlining)]
         public static void RemoveResource(string key) {
-            NamedResources.Remove(key);
+            NamedResources<TWorld>.Remove(key);
         }
         #endregion
 

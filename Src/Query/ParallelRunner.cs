@@ -228,7 +228,7 @@ namespace FFS.Libraries.StaticEcs {
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
     [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
     #endif
-    internal struct ParallelData<T> {
+    internal struct ParallelData<T> : IResource {
         internal T Value;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -241,7 +241,7 @@ namespace FFS.Libraries.StaticEcs {
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
     [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
     #endif
-    internal struct ParallelData<T1, T2> {
+    internal struct ParallelData<T1, T2> : IResource {
         internal T1 Value1;
         internal T2 Value2;
 

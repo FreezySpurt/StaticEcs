@@ -14,11 +14,11 @@
 - **Add/Set semantics**: `Add<T>()` without value is idempotent — if exists, returns ref to existing data, NO hooks called. `Set(value)` ALWAYS overwrites — calls OnDelete on old → overwrites → calls OnAdd on new.
 - **Component hooks**: `OnAdd<TW>(entity)`, `OnDelete<TW>(entity, reason)`, `CopyTo<TW>(self, other, disabled)`, `Write<TW>(ref writer, entity)`, `Read<TW>(ref reader, entity, version, disabled)`. All have default empty implementations. `HookReason` enum (`Default`, `UnloadEntity`, `WorldDestroy`) indicates why deletion occurs. `IEntityType.OnDestroy` also receives `HookReason reason`.
 - **Tags** (`ITag`): Zero-size markers (bitmap only, no data storage). `entity.Set<T>()`, `entity.Has<T>()`, `entity.Delete<T>()`. Tags use the same API and query filters as components.
-- **Enable/Disable**: Both entities and individual components can be enabled/disabled. Disabled items are excluded from default queries but data is preserved.
+- **Enable/Disable**: Both entities and individual components can be enabled/disabled. Disabled items are excluded from default queries but data is preserved. **Per-component opt-in via `IDisableable` marker** — `Entity.Disable<T>()`/`Enable<T>()`/`HasDisabled<T>()`/`HasEnabled<T>()` and the `*Disabled` filters (`AllOnlyDisabled`, `AllWithDisabled`, `NoneWithDisabled`, `AnyOnlyDisabled`, `AnyWithDisabled`) constrain `T : struct, IComponent, IDisableable`. Components without the marker pay no memory (no allocated disabled-half of mask segments) or serialization overhead (no per-entity `DisabledBit`, no per-chunk disabled mask). Built-in `Multi<T>`, `Link<T>`, `Links<T>` implement `IDisableable`. Snapshot format is self-describing — toggling `IDisableable` on a type between write and read is safe.
 - **MultiComponent** (`IMultiComponent`): Variable-length per-entity data (struct, not just unmanaged). Stored as `Multi<TValue>` component. Register: `W.Types().Multi<Item>()`. Serialization strategy auto-detected: `UnmanagedPackArrayStrategy<T>` for unmanaged, `StructPackArrayStrategy<T>` for managed. Custom config via `IMultiComponentConfig<T>`. Operations: Add, RemoveAt, IndexOf, Contains, foreach by reference, Span access.
 - **Relations**: `ILinkType` for single entity reference (`Link<T>`), `ILinksType` for multiple (`Links<T>`). Both support OnAdd/OnDelete/CopyTo hooks. Register: `W.Types().Link<T>()` / `W.Types().Links<T>()`.
 - **Systems**: `ISystem` with `Init()`, `Update()`, `UpdateIsActive() → bool`, `Destroy()`. Group via `ISystemsType`. Nested in `World<TWorld>`. `W.Systems<TSys>.Create()` → `Add(system, order)` → `Initialize()` → `Update()` per frame → `Destroy()`.
-- **Resources**: `W.SetResource<T>(value)` / `ref var r = ref W.GetResource<T>()` for singletons. `NamedResource<T>(key)` for keyed resources.
+- **Resources**: `W.SetResource<T>(value)` / `ref var r = ref W.GetResource<T>()` for singletons. `NamedResource<T>(key)` for keyed resources. The same API is mirrored on each systems pipeline: `W.Systems<TSys>.SetResource<T>(...)`, `W.Systems<TSys>.GetResource<T>(...)`, plus `W.Systems<TSys>.Resource<T>` / `NamedResource<T>` handles. Per-systems storage is fully independent from world storage and from other `ISystemsType` groups, and is cleared on `Systems<TSys>.Destroy()` (independent of `W.Destroy()`).
 - **Events**: `IEvent` structs. `W.SendEvent<T>(value)` → `W.RegisterEventReceiver<T>()` → iterate with foreach. SendEvent is thread-safe when there is no concurrent reading of the same event type; receiver ops are main-thread only.
 - **Clusters**: Logical entity groupings for spatial partitioning and streaming. Each entity belongs to one cluster. Clusters can be loaded/unloaded. Queries can target specific clusters.
 
@@ -36,21 +36,22 @@
 - **Entity type filters**: `EntityIs<T>` (exact type), `EntityIsNot<T0..T4>` (exclude types, 1-5), `EntityIsAny<T0..T4>` (any of types, 2-5)
 - **Composite**: `And<TFilter0..TFilter5>` combines filters with AND semantics (all must match). `Or<TFilter0..TFilter5>` combines with OR semantics (any must match). `Nothing` matches all.
 - **Batch ops**: `W.Query<Filter>().BatchSet(value)`, `BatchDelete<T>()`, `BatchSet<T>()` (for tags), `BatchDestroy()`, `BatchUnload()`.
-- **Query modes**: Strict (default, faster — forbids modifying filtered types on OTHER entities) vs Flexible (allows it, re-checks bitmasks). Foreach: `.Entities()` for Strict, `.EntitiesFlexible()` for Flexible.
+- **Query modes**: Strict (default, faster) vs Flexible. Restrictions apply only to other entities **belonging to the iteration snapshot** (the bitmask of filter-matching entities fixed at iteration start). Strict forbids modifying filtered types and destroying/disabling/enabling other snapshot entities; Flexible additionally allows `Destroy`/`Disable`/`Enable` on other snapshot entities (re-reads cached bitmask per entity). In both modes, entities outside the snapshot — created during iteration or not matching the filter — are NOT blocked: create, configure, mutate, destroy them freely. Foreach: `.Entities()` for Strict, `.EntitiesFlexible()` for Flexible.
 - **Entity status**: All query methods accept `EntityStatusType` parameter: `Enabled` (default), `Disabled`, `Any`.
 
 ## Change Tracking
 
 - **Opt-in, bitmap-based, zero-allocation, tick-versioned**. Disabled by default. Enable per-type at registration.
 - **Tick-based ring buffer**: `WorldConfig.TrackingBufferSize` (default 8). `W.Tick()` advances world tick — call once per frame after `W.Systems.Update()`. Each system automatically sees changes since its last execution via per-system `LastTick`.
-- **Component tracking**: Enable via `IComponentConfig<T>` returning `ComponentTypeConfig<T>(trackAdded: true, trackDeleted: true, trackChanged: true)`.
-- **Tag tracking**: Enable via `ITagConfig<T>` returning `TagTypeConfig<T>(trackAdded: true, trackDeleted: true)`.
+- **Component tracking**: Enable by implementing marker interfaces on the component type: `ITrackableAdded`, `ITrackableDeleted`, `ITrackableChanged`. Query filters and `Entity.HasXxx<T>()` constrain `T` to the corresponding marker — missing marker = compile error.
+- **Tag tracking**: Enable by implementing marker interfaces on the tag type: `ITrackableAdded`, `ITrackableDeleted`. (`ITrackableChanged` is ignored on tags.)
 - **Entity creation tracking**: `WorldConfig { TrackCreated = true }`.
 - **Tracking filters** (1–5 type params): `AllAdded<>`, `NoneAdded<>`, `AnyAdded<>`, `AllDeleted<>`, `NoneDeleted<>`, `AnyDeleted<>`, `AllChanged<>`, `NoneChanged<>`, `AnyChanged<>`. All accept optional `fromTick` constructor parameter. Added/Deleted filters work with both components and tags.
 - **Entity creation filter**: `Created` (requires `WorldConfig.TrackCreated = true`). Accepts optional `fromTick`.
 - **Data access and tracking**: `Ref<T>()` does NOT mark Changed (fast path). `Mut<T>()` marks Changed. `Read<T>()` does NOT mark Changed. In delegates: `ref` marks Changed, `in` does not. In IQuery: `Write<>` marks, `Read<>` does not.
-- **Clearing**: `ClearTracking()` clears ALL ring buffer slots — normally not needed (tracking managed automatically by `W.Tick()` + `W.Systems<T>.Update()`). Use as nuclear reset after deserialization.
-- **Entity checks**: `entity.HasAdded<T>()`, `entity.HasDeleted<T>()`, `entity.HasChanged<T>()`. These work for both components and tags. All accept optional `fromTick` parameter.
+- **Clearing**: `ClearTracking()` clears ALL ring buffer slots — normally not needed (tracking managed automatically by `W.Tick()` + `W.Systems<T>.Update()`).
+- **Serialization**: World snapshots persist `CurrentTick`, `CurrentLastTick`, and the entire tracking ring buffer (per-component Added/Changed/Deleted, entity `TrackCreated`). Target world's `TrackingBufferSize` and `TrackCreated` must match saved values — mismatch throws `StaticEcsException`. Cluster and chunk snapshots do **NOT** save tracking; loading them leaves target world's tick and tracking state untouched.
+- **Entity checks**: `entity.HasAdded<T>()`, `entity.HasDeleted<T>()`, `entity.HasChanged<T>()` — work for both components and tags (`T` must implement the corresponding `ITrackableXxx` marker). `entity.HasCreated()` — requires `WorldConfig.TrackCreated = true`. All accept optional `fromTick` parameter.
 - **Game loop**: `W.Systems<Update>.Update()` → `W.Tick()` → repeat. Multiple system groups share the same tick.
 
 ## Common Pitfalls
@@ -59,7 +60,7 @@
 - **Using Entity after Destroy**: Entity is a uint slot handle. After `Destroy()`, the slot is reused — the old handle now points to a different entity. Use `EntityGID` for safe persistent references.
 - **Add vs Set semantics**: `entity.Add<Position>()` does NOT overwrite if component exists — it returns the existing data silently. To overwrite, use `entity.Set(new Position{...})`.
 - **Empty hook methods causing overhead**: If IComponent has any non-empty hook method, reflection detects it at startup and enables hook dispatch for ALL instances of that component type. Don't implement hooks you don't need.
-- **Strict mode violations**: In default Strict query mode, modifying filtered component/tag types on OTHER entities during iteration is forbidden. Use Flexible mode if needed, or restructure the code.
+- **Filtered-type mutations on other snapshot entities**: Modifying filtered component/tag types on other entities **that are part of the iteration snapshot** is forbidden in BOTH Strict and Flexible (asserts in DEBUG). Flexible does NOT lift this restriction — it only additionally allows `Destroy`/`Disable`/`Enable` on other snapshot entities. Buffer such mutations and apply them after the loop. Entities outside the snapshot (created mid-iteration, or non-matching) are not blocked.
 - **Storing Entity across frames**: Entity handles have no generation counter. A stored Entity may silently alias a different entity after the original is destroyed. Always use EntityGID for cross-frame references.
 - **Parallel iteration constraints**: During `ForParallel`, only modify the CURRENT entity. Do not create/destroy entities or modify other entities.
 - **Forgetting StaticPack for serialization**: Serialization requires FFS.StaticPack. All serializable types need Guid registration. Non-unmanaged components need Write/Read hook implementations.
@@ -346,15 +347,16 @@ ___
 // Standard initialization (baseEntitiesCapacity — initial entity capacity)
 W.Initialize(baseEntitiesCapacity: 4096);
 
-// Initialize with restored entity identifiers (EntityGID versions)
-W.InitializeFromGIDStoreSnapshot(snapshot);
+// After initialization, an existing snapshot can be loaded:
+// — entity identifiers only (EntityGID versions)
+W.Serializer.RestoreFromGIDStoreSnapshot(snapshot);
 
-// Initialize with full world restoration from a snapshot
-W.InitializeFromWorldSnapshot(snapshot);
+// — or full world state (entities and all their data)
+W.Serializer.LoadWorldSnapshot(snapshot);
 ```
 
 {: .note }
-`InitializeFromGIDStoreSnapshot` restores only entity identifier metadata (GID versions). `InitializeFromWorldSnapshot` restores the full world state, including all entities and their data.
+`RestoreFromGIDStoreSnapshot` restores only entity identifier metadata (GID versions). `LoadWorldSnapshot` restores the full world state, including all entities and their data. Both require the world to already be initialized.
 
 ___
 
@@ -2751,6 +2753,7 @@ Resources are an alternative to DI — a simple mechanism for storing and passin
 - Ideal for configuration, time/delta-time, input state, asset caches, service references
 - Two variants: **singleton** (one per type) and **named** (multiple per type, distinguished by string key)
 - Available in both `Created` and `Initialized` world phases
+- Every resource type **must** implement the marker interface `IResource`
 
 ___
 
@@ -2761,9 +2764,9 @@ Internally uses static generic storage — access is O(1) with zero dictionary o
 
 #### Setting a resource:
 ```csharp
-// User classes and services
-public class GameConfig { public float Gravity; }
-public class InputState { public Vector2 MousePos; }
+// User classes and services — must implement IResource
+public class GameConfig : IResource { public float Gravity; }
+public class InputState : IResource { public Vector2 MousePos; }
 
 // Set a resource in the world
 // By default clearOnDestroy = true — the resource will be automatically cleared on World.Destroy()
@@ -2859,6 +2862,42 @@ ref var config = ref W.GetResource<GameConfig>();
 W.Destroy();
 ```
 
+___
+
+## Systems-scoped resources
+
+Both `Resource<T>` and `NamedResource<T>` also exist at the systems-pipeline level. Each `World<TWorld>.Systems<TSystemsType>` has its own independent resource storage, isolated from the world's resources and from other systems groups. The lifecycle of these resources is bound to the systems pipeline: they are cleared on `Systems<TSystemsType>.Destroy()`, not on `World<TWorld>.Destroy()`.
+
+The same method set as on the world is mirrored on `Systems<TSystemsType>` — only the storage scope differs:
+
+```csharp
+public struct FixedSystems : ISystemsType { }
+public abstract class FixedSys : W.Systems<FixedSystems> { }
+
+public struct FixedTime : IResource { public float Accumulator; public float Step; }
+
+// Singleton and keyed resources scoped to FixedSys
+FixedSys.SetResource(new FixedTime { Step = 1f / 60f });
+ref var time = ref FixedSys.GetResource<FixedTime>();
+FixedSys.SetResource("solver_a", new SolverState());
+
+// Handle structs mirror world-level handles but read from the systems-scoped storage
+public struct PhysicsSystem : ISystem {
+    private FixedSys.Resource<FixedTime> _time;
+    private FixedSys.NamedResource<SolverState> _solver = new("solver_a");
+
+    public void Update() {
+        ref var time = ref _time.Value;
+        ref var solver = ref _solver.Value;
+    }
+}
+
+// Resources scoped to FixedSys are cleared by FixedSys.Destroy() independently of W.Destroy()
+FixedSys.Destroy();
+```
+
+The `NamedResource<T>` caching warning applies in the same way (do not store handles in `readonly` fields). Different `ISystemsType` types keep their resource stores fully independent, and they are also independent from world-level resources.
+
 
 ---
 
@@ -2867,7 +2906,7 @@ W.Destroy();
 Queries are a mechanism for searching entities and their components in the world
 - All queries require no caching, are stack-allocated, and can be used on-the-fly
 - Support filtering by components, tags, entity status, and clusters
-- Two iteration modes: `Strict` (default, faster) and `Flexible` (allows modifying filtered types on other entities)
+- Two iteration modes: `Strict` (default, faster) and `Flexible` (additionally allows destroying / disabling / enabling other snapshot entities during iteration). In both modes, entities outside the iteration snapshot — created mid-iteration or not matching the filter — are not blocked.
 
 ___
 
@@ -2975,9 +3014,11 @@ foreach (var entity in W.Query(filter).Entities()) {
     entity.Ref<Position>().Value += entity.Read<Velocity>().Value;
 }
 
-// Flexible mode — allows modifying filtered types on other entities
+// Flexible mode — allows destroying / disabling / enabling other snapshot entities during iteration
 foreach (var entity in W.Query<All<Position>>().EntitiesFlexible()) {
-    // ...
+    // safe here: another.Destroy(), another.Disable(), another.Enable() — for snapshot entities too
+    // still forbidden (asserts in DEBUG): another.Delete<Position>(), another.Disable<Position>(), etc. on snapshot entities
+    // creating new entities and configuring them is always allowed (any mode) — they are not in the snapshot
 }
 
 // Find the first matching entity
@@ -2989,6 +3030,24 @@ if (W.Query<All<Position>>().Any(out var found)) {
 if (W.Query<All<Position>>().One(out var single)) {
     // single — the only entity with Position
 }
+
+// Test whether a given entity belongs to the query result
+//   - checks the entity's lifecycle state (default: only Enabled)
+//   - checks cluster membership (if clusters are provided)
+//   - applies the query filter via Entity.IsMatch
+if (W.Query<All<Position, Velocity>>().Contains(entity)) {
+    // entity is enabled and passes the filter
+}
+
+// With optional parameters
+W.Query<All<Position>>().Contains(
+    entity,
+    entities: EntityStatusType.Any,                 // Enabled (default), Disabled, Any
+    clusters: stackalloc ushort[] { 1, 2 }          // empty = any cluster
+);
+
+// Single-entity filter check (no cluster / lifecycle gating)
+bool match = entity.IsMatch<All<Position, Velocity>>();
 
 // Count matching entities (full scan)
 int count = W.Query<All<Position>>().EntitiesCount();
@@ -3313,21 +3372,27 @@ ___
 
 For `For`, `Search`, `Entities` methods:
 
-- **`QueryMode.Strict`** (default) — forbids modifying filtered component/tag types on **other** entities during iteration. Faster.
-- **`QueryMode.Flexible`** — allows modifying filtered types on other entities, correctly controls current iteration.
+- **`QueryMode.Strict`** (default) — during iteration on **other entities that belong to the iteration snapshot** forbids both modifications of filtered component/tag types (Add/Delete/Enable/Disable) and entity-level operations (`Destroy`/`Disable`/`Enable`). The "iteration snapshot" is the bitmask of entities matching the filter at the moment iteration starts. Entities outside the snapshot — created during the loop or not matching the filter — are **not** blocked: you can freely create new entities and configure them, mutate non-matching entities, etc. Faster.
+- **`QueryMode.Flexible`** — same restrictions on filtered-type modifications as Strict, but additionally **allows** `Destroy` / `Disable` / `Enable` on other snapshot entities; such entities are correctly excluded from the remaining iteration via cached bitmask updates. Slower — re-reads the cached mask per entity.
 
 ```csharp
 var anotherEntity = W.NewEntity<Default>();
 anotherEntity.Add<Position>();
 
-// Strict: modifying Position on another entity — error in DEBUG
+// Strict: destroying another snapshot entity during iteration — error in DEBUG
 foreach (var entity in W.Query<All<Position>>().Entities()) {
-    anotherEntity.Delete<Position>(); // ERROR in DEBUG
+    anotherEntity.Destroy(); // ERROR in DEBUG (anotherEntity is in the snapshot)
+
+    // OK — entities created mid-iteration are NOT in the snapshot
+    var fresh = W.NewEntity<Default>();
+    fresh.Add<Position>();
+    fresh.Set(new Velocity { ... });
 }
 
-// Flexible: modification allowed, iteration is stable
+// Flexible: destroy/disable/enable of another snapshot entity is allowed
 foreach (var entity in W.Query<All<Position>>().EntitiesFlexible()) {
-    anotherEntity.Delete<Position>(); // OK — anotherEntity correctly excluded
+    anotherEntity.Destroy();            // OK — excluded from the rest of the iteration
+    // anotherEntity.Delete<Position>(); // still ERROR in DEBUG — filtered-type mutation on another snapshot entity
 }
 
 // For For/Search via parameter
@@ -3337,7 +3402,7 @@ W.Query().For(static (ref Position pos) => {
 ```
 
 {: .note }
-`Flexible` is useful for hierarchies or caches when modifying entities from components of other entities. In other cases, prefer `Strict` for performance.
+`Flexible` is useful when iteration logic destroys or toggles (`Disable`/`Enable`) other snapshot entities — for example, pruning child entities during a parent traversal or bulk-deactivating entities affected by an AoE effect. It does **not** lift the ban on modifying filtered component/tag types of other snapshot entities — such mutations must be deferred (e.g. collected into a buffer and applied after the `foreach`). In other cases, prefer `Strict` for performance. Creating new entities and configuring them inside the loop is always allowed in both modes — newly created entities are not part of the iteration snapshot.
 
 ---
 
@@ -3439,22 +3504,119 @@ ___
 
 #### Receiver management:
 ```csharp
-// Read all events via delegate
-weatherReceiver.ReadAll(static (Event<WeatherChanged> e) => {
+// Read all events via delegate; returns the number of times the delegate was invoked
+int handled = weatherReceiver.ReadAll(static (Event<WeatherChanged> e) => {
     Console.WriteLine(e.Value.WeatherType);
 });
 
 // Suppress all unread events for this receiver
 // Events are deleted and other receivers can no longer read them
-weatherReceiver.SuppressAll();
+// Returns the number of events actually suppressed by this call
+int suppressed = weatherReceiver.SuppressAll();
 
 // Mark all events as read without processing
 // Events are not deleted — other receivers can still read them
-weatherReceiver.MarkAsReadAll();
+// Returns the number of events actually marked as read
+int marked = weatherReceiver.MarkAsReadAll();
 
 // Delete the receiver
 W.DeleteEventReceiver(ref weatherReceiver);
 ```
+
+`ReadAll`, `MarkAsReadAll` and `SuppressAll` return the number of events for which the receiver
+performed real work in this call. Events that were already suppressed by another receiver (or
+already fully consumed by all other receivers) are silently skipped — from the calling receiver's
+point of view those events did not exist, and they are **not** included in the returned count.
+Concretely:
+
+- `ReadAll(action)` — number of times `action` was invoked.
+- `MarkAsReadAll()` — number of events whose unread counter was actually decremented.
+- `SuppressAll()` — number of events whose unread counter was non-zero and was zeroed by this call.
+
+___
+
+#### Peek — inspection without consumption:
+
+`Peek()` returns an iterator that walks all unread events of this receiver **without advancing
+the cursor and without decrementing `UnreadReceiversCount`**. After the foreach exits, the
+receiver state is unchanged — running `foreach (var e in receiver.Peek())` again yields the same
+events.
+
+Useful for multi-pass handling, dry-run/diagnostics, or reading queued state without committing
+to consumption.
+
+```csharp
+foreach (var e in weatherReceiver.Peek()) {
+    Console.WriteLine(e.Value.WeatherType);
+    // data is accessible via e.Value, but the event is NOT marked as read
+}
+// A subsequent regular foreach still sees the same events and consumes them normally:
+foreach (var e in weatherReceiver) { ... }
+```
+
+___
+
+#### LastOnly — consume only when this receiver is the last reader:
+
+`LastOnly()` returns an iterator that walks all unread events from the receiver's cursor
+onward and yields **only those for which this receiver is the last unread reader** (equivalent
+to `IsLastReading() == true`). Yielded events are automatically marked as consumed (decrement
++ mask bit cleared), just like in a regular foreach. Events still pending other receivers
+(`UnreadCount > 1`) are **skipped without modification** — they remain reachable on later
+passes. The receiver's cursor advances only through the contiguous prefix of done events; once
+the walk passes an unprocessed event the cursor stops there, but the iterator keeps scanning
+forward to find later positions where this receiver is already last.
+
+This is the natural expression of «do something exactly once after every other receiver has
+reacted», independent of system order within a frame.
+
+{: .warning }
+Only **one** receiver per event type should use `LastOnly()` — two would wait on each other
+forever and events would hang indefinitely. This is the user's responsibility; the framework
+does not validate it.
+
+Example: destroying an entity after death. When an entity dies, a `DeadEvent` carrying its
+`EntityGID` is dispatched, and several systems must read the entity (spawn loot, grant XP, play
+death sound) **before** the entity is physically destroyed. Destroying it on death prevents
+reactors from reading components; destroying via manual `IsLastReading()` requires a guarantee
+that the cleanup system runs last — which usually doesn't hold.
+
+With `LastOnly()`, the cleaner simply waits for the right frame:
+
+```csharp
+public struct DeadEvent : IEvent { public EntityGID Gid; }
+
+// Reactors are registered the regular way:
+EventReceiver<GameWT, DeadEvent> lootReactor = W.RegisterEventReceiver<DeadEvent>();
+EventReceiver<GameWT, DeadEvent> xpReactor   = W.RegisterEventReceiver<DeadEvent>();
+// Cleaner — registered the regular way, but will use LastOnly():
+EventReceiver<GameWT, DeadEvent> deadCleaner = W.RegisterEventReceiver<DeadEvent>();
+
+// On death — send the event; the entity stays alive for now:
+W.SendEvent(new DeadEvent { Gid = entity.Gid() });
+
+// Reactor systems (any order, regular foreach):
+foreach (var e in lootReactor) {
+    if (e.Value.Gid.TryUnpack(out var entity)) SpawnLoot(entity.Read<Position>());
+}
+foreach (var e in xpReactor) {
+    if (e.Value.Gid.TryUnpack(out var entity)) GiveXp(entity.Read<XpReward>().Amount);
+}
+
+// Cleanup system (anywhere in the pipeline):
+foreach (var e in deadCleaner.LastOnly()) {
+    if (e.Value.Gid.TryUnpack(out var entity)) {
+        entity.Destroy();   // safe: all other receivers have already consumed
+    }
+    // no MarkAsRead needed — the iterator marks events as consumed automatically
+}
+```
+
+Frame N: reactors and cleaner run in arbitrary order. Each event still pending some reactor
+has `UnreadCount > 1` — `LastOnly()` skips it without modification (mask stays, cursor doesn't
+move past it). Events that every reactor has already consumed get yielded here and the entity
+is destroyed inline. Frame N+1: remaining reactors read their pending events, and the next
+cleaner pass picks up everything that has become ready since.
 
 ___
 
@@ -3626,15 +3788,15 @@ W.Types()
 
 #### Full configuration:
 ```csharp
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
     public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."), // stable identifier for serialization (default — auto-computed from type name)
-        trackAdded: true,                // enable addition tracking (default — false)
-        trackDeleted: true               // enable deletion tracking (default — false)
+        guid: new Guid("A1B2C3D4-...") // stable identifier for serialization (default — auto-computed from type name)
     );
 }
 W.Types().Tag<Poisoned>();
 ```
+Change tracking is enabled by implementing marker interfaces (`ITrackableAdded`, `ITrackableDeleted`) on the type itself — see the Change Tracking section.
 
 ___
 
@@ -3666,23 +3828,16 @@ ___
 
 ## World Snapshot
 
-Saves the full world state: all entities, components, tags, and events.
+Saves the full world state: all entities, components, tags, events, and change tracking state.
 
-#### Saving and loading during initialization:
-```csharp
-// Save the world
-byte[] worldSnapshot = W.Serializer.CreateWorldSnapshot();
-W.Destroy();
+{: .important }
+**World snapshots persist the tick and the entire tracking history.** The saved stream includes `CurrentTick`, `CurrentLastTick`, and all `TrackingBufferSize + 1` history slots — for `AllAdded<T>` / `AllChanged<T>` / `AllDeleted<T>` filters, per-entity `HasAdded/HasChanged/HasDeleted` methods, and world-level `HasCreated` tracking. After loading, tick-based tracking queries (including those using `fromTick`) return the same results as before saving.
 
-// Load the world during initialization — the simplest approach
-CreateWorld(); // Create + type registration
-W.InitializeFromWorldSnapshot(worldSnapshot);
+{: .important }
+**Configuration must match when loading.** The `TrackingBufferSize` and `TrackCreated` values of the target world must equal those saved in the snapshot. Any mismatch throws `StaticEcsException`. This is a property of the `WorldConfig` passed during world creation — changing it between save and load is not supported.
 
-// All entities and events are restored
-foreach (var entity in W.Query().Entities()) {
-    Console.WriteLine(entity.PrettyString);
-}
-```
+{: .note }
+Each snapshot begins with a 2-byte format version header (`FormatVersion = 3`) and an 8-byte snapshot size. Loading a snapshot produced by an incompatible version throws `StaticEcsException` with a clear message. Version `3` adds two new sections — resources and systems — between the events block and the user-facing custom-snapshot data; older v2 snapshots are not compatible with v3 readers.
 
 #### Saving and loading after initialization:
 ```csharp
@@ -3804,7 +3959,8 @@ W.Destroy();
 
 // 2. Restore world with GID Store
 CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
+W.Initialize();
+W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 
 // New entities won't occupy saved entity slots
 var newEntity = W.NewEntity<UnitType>().Set( new Position { X = 1 });
@@ -3836,12 +3992,10 @@ W.Serializer.CreateGIDStoreSnapshot(strategy: ChunkWritingStrategy.SelfOwner);
 // Filter by clusters
 W.Serializer.CreateGIDStoreSnapshot(clusters: new ushort[] { 0, 1 });
 
-// Initialize world from GID Store
-CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
-
 // Restore GID Store in an already initialized world
 // All entities are deleted, state is reset
+CreateWorld();
+W.Initialize();
 W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 ```
 
@@ -3888,6 +4042,9 @@ W.Serializer.LoadChunkSnapshot(chunkSnapshot);
 
 {: .important }
 By default, cluster and chunk snapshots **do not store** entity identifier data (only component data). If you need to load them as new entities (`entitiesAsNew: true`), specify `withEntitiesData: true` when creating the snapshot.
+
+{: .important }
+**Cluster and chunk snapshots do not save change tracking data.** Unlike world snapshots, these partial snapshots are designed for streaming and migration scenarios where the target world has its own independent tick and tracking state. Loading a cluster or chunk snapshot leaves the target world's `CurrentTick`, `CurrentLastTick`, and tracking history untouched; only entities, components, and tags are restored. If consistent tracking across partial snapshots is required, use a world snapshot instead.
 
 ___
 
@@ -3936,7 +4093,8 @@ byte[] gidSnapshot = W.Serializer.CreateGIDStoreSnapshot();
 W.Destroy();
 
 CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
+W.Initialize();
+W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 
 // Load in any order
 W.Serializer.LoadClusterSnapshot(clusterSnapshot);
@@ -4284,39 +4442,37 @@ ___
 
 ## Configuration
 
-All tracking is disabled by default and must be explicitly enabled at registration time.
+All tracking is disabled by default and must be explicitly enabled by implementing the corresponding marker interface on the component/tag type.
+
+Tracking is controlled by three marker interfaces, applicable to both components and tags (with one exception noted below):
+
+| Interface | Enables |
+|-----------|---------|
+| `ITrackableAdded` | Tracking of additions (`AllAdded`, `NoneAdded`, `AnyAdded`, `Entity.HasAdded<T>()`) |
+| `ITrackableDeleted` | Tracking of deletions (`AllDeleted`, `NoneDeleted`, `AnyDeleted`, `Entity.HasDeleted<T>()`) |
+| `ITrackableChanged` | Tracking of value changes (`AllChanged`, `NoneChanged`, `AnyChanged`, `Entity.HasChanged<T>()`). Applies to components only — ignored on tags. |
+
+Query filters and `Entity.HasXxx<T>()` methods statically constrain their type parameters to the corresponding marker interface — missing a marker is a compile-time error, not a runtime assert.
 
 ### Components
 
-Tracking is enabled via `IComponentConfig<T>` on the struct itself. `ComponentTypeConfig<T>` supports three tracking flags: `trackAdded`, `trackDeleted`, `trackChanged`:
-
 ```csharp
-// Enable all three tracking types
-public struct Health : IComponent, IComponentConfig<Health> {
+// Track all three kinds
+public struct Health : IComponent, ITrackableAdded, ITrackableDeleted, ITrackableChanged {
     public float Value;
-    public ComponentTypeConfig<Health> Config() => new(
-        trackAdded: true,
-        trackDeleted: true,
-        trackChanged: true
-    );
 }
 
-// Enable only one direction
-public struct Velocity : IComponent, IComponentConfig<Velocity> {
+// Track only additions
+public struct Velocity : IComponent, ITrackableAdded {
     public float X, Y, Z;
-    public ComponentTypeConfig<Velocity> Config() => new(
-        trackAdded: true  // track additions only
-    );
 }
 
-// Full configuration with tracking
-public struct Position : IComponent, IComponentConfig<Position> {
+// Combine marker interfaces with IComponentConfig<T> if you also need custom config
+public struct Position : IComponent, IComponentConfig<Position>,
+                         ITrackableAdded, ITrackableDeleted, ITrackableChanged {
     public float X, Y, Z;
     public ComponentTypeConfig<Position> Config() => new(
-        guid: new Guid("..."),
-        trackAdded: true,
-        trackDeleted: true,
-        trackChanged: true
+        guid: new Guid("...")
     );
 }
 
@@ -4332,23 +4488,15 @@ W.Initialize();
 
 ### Tags
 
-Tracking is enabled via `ITagConfig<T>` on the struct itself. `TagTypeConfig<T>` supports `trackAdded` and `trackDeleted`. Tags do **not** support Changed tracking.
+Tags support `ITrackableAdded` and `ITrackableDeleted`. Tags do **not** support Changed tracking — `ITrackableChanged` on a tag is silently ignored.
 
 ```csharp
-public struct Unit : ITag, ITagConfig<Unit> {
-    public TagTypeConfig<Unit> Config() => new(
-        trackAdded: true,
-        trackDeleted: true
-    );
-}
+public struct Unit : ITag, ITrackableAdded, ITrackableDeleted { }
 
-// With GUID for serialization
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
-    public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."),
-        trackAdded: true,
-        trackDeleted: true
-    );
+// With GUID for serialization via ITagConfig<T>
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
+    public TagTypeConfig<Poisoned> Config() => new(guid: new Guid("A1B2C3D4-..."));
 }
 
 W.Types()
@@ -4374,7 +4522,7 @@ W.Initialize();
 
 ### Auto-Registration
 
-`trackAdded`, `trackDeleted`, and `trackChanged` can be declared in a static `Config` field inside the struct — `RegisterAll()` will pick them up automatically.
+The `ITrackableAdded` / `ITrackableDeleted` / `ITrackableChanged` marker interfaces are detected automatically by `RegisterAll()` — no additional configuration is needed. Registration checks `default(T) is ITrackableXxx` for every registered component/tag type.
 
 ### Compile-Time Disable
 
@@ -4756,12 +4904,17 @@ entity.Destroy();
 
 ### After Deserialization
 
+- **World snapshot** (`LoadWorldSnapshot`): the entire tracking state — including `CurrentTick`, `CurrentLastTick`, all ring buffer slots for every component/tag with tracking markers, and world-level `TrackCreated` history — is restored verbatim. No call to `ClearTracking()` is required; after loading, `AllAdded<T>`, `AllChanged<T>`, `AllDeleted<T>`, `Created` and the per-entity `HasXxx(fromTick)` methods return the same results as before saving. The target world's `TrackingBufferSize` and `TrackCreated` must match those of the saved world — mismatch throws `StaticEcsException`.
+- **Cluster / chunk snapshot** (`LoadClusterSnapshot` / `LoadChunkSnapshot`): tracking data is **not** stored in these partial snapshots. Loading them does not touch the target world's tick or tracking history. Applied entity / component changes do **not** generate `Added` / `Changed` / `Deleted` bits in the target — they are direct mask writes. If you need the inserted chunks to participate in tracking from now on, call `ClearTracking()` (or the per-component / per-entity variants) to establish a clean baseline, then continue normally.
+
 ```csharp
-// ReadChunk writes masks directly — tracking is NOT triggered
-// ReadEntity goes through Add — components are marked as Added
-// Recommended to call ClearTracking() after loading:
-W.Serializer.ReadChunk(ref reader);
-W.ClearTracking(); // reset all tracking (in tick-based mode: clears all ring buffer slots)
+// World snapshot — tracking is fully restored, no extra action needed:
+W.Serializer.LoadWorldSnapshot(worldSnapshot);
+
+// Cluster / chunk snapshot — optional nuclear reset if the existing tracking
+// state conflicts with the freshly-loaded chunks:
+W.Serializer.LoadClusterSnapshot(clusterSnapshot);
+W.ClearTracking(); // optional; resets all ring buffer slots
 ```
 
 ___
@@ -4826,6 +4979,10 @@ bool bothTagsAdded = entity.HasAdded<Unit, Player>();      // Unit AND Player ad
 // Tags — same API as components (ANY semantics)
 bool anyTagAdded = entity.HasAnyAdded<Unit, Player>();     // Unit OR Player added
 bool anyTagDeleted = entity.HasAnyDeleted<Unit, Player>(); // Unit OR Player deleted
+
+// Entity creation (requires WorldConfig.TrackCreated = true)
+bool wasCreated = entity.HasCreated();
+bool createdSinceTick5 = entity.HasCreated(fromTick: 5);
 
 // Combine with presence check
 if (entity.HasAdded<Position>() && entity.Has<Position>()) {
@@ -5171,7 +5328,7 @@ ___
 
 ## QueryMode
 
-The default is `QueryMode.Strict` — the fastest mode. Use `QueryMode.Flexible` only when you need to modify filtered components/tags on **other** entities during iteration:
+The default is `QueryMode.Strict` — the fastest mode. Use `QueryMode.Flexible` only when iteration logic needs to `Destroy` / `Disable` / `Enable` **other snapshot** entities during the loop (those are the only extra operations Flexible allows; modifying filtered component/tag types of other snapshot entities is still asserted in DEBUG in both modes). Restrictions in both modes apply only to entities that are part of the iteration snapshot — newly created entities and entities that did not pass the filter are not blocked in either mode:
 
 ```csharp
 // Strict (default) — fast path for full blocks
@@ -5179,10 +5336,13 @@ W.Query().For(
     static (ref Position pos) => { /* ... */ }
 );
 
-// Flexible — re-checks bitmasks on each iteration
+// Flexible — re-reads cached bitmask per entity so that
+// destroyed / disabled / enabled snapshot entities are skipped.
 W.Query().For(
     static (W.Entity entity, ref Position pos) => {
-        // Can modify Position on other entities
+        // Safe: destroy / disable / enable another snapshot entity here.
+        // Still forbidden: modifying filtered components of another snapshot entity.
+        // Always allowed (any mode): creating new entities and configuring them.
     },
     queryMode: QueryMode.Flexible
 );
@@ -5439,17 +5599,41 @@ ___
 
 ## Query Errors
 
-### Strict mode violations
-In the default Strict query mode, modifying filtered component/tag types on OTHER entities during iteration is forbidden. This includes Add/Delete/Enable/Disable of filtered types on entities other than the current one.
+### Iteration snapshot vs other entities
+Strict / Flexible restrictions apply only to **other entities that belong to the iteration snapshot** — the bitmask of entities matching the filter at the moment iteration starts. Entities outside the snapshot are NOT blocked: they can be freely created, configured, mutated, or destroyed inside the loop. This includes entities created during iteration (always outside the snapshot) and entities that did not pass the filter.
+
+### Modifying filtered types on other snapshot entities
+Add/Delete/Enable/Disable of filtered component/tag types on snapshot entities other than the currently iterated one is **forbidden in both Strict and Flexible modes** and is asserted in DEBUG. Flexible does NOT lift this restriction.
 ```csharp
-// WRONG in Strict mode:
+// WRONG — otherEntity is part of the snapshot:
 foreach (var e in W.Query<All<Position>>().Entities()) {
-    otherEntity.Delete<Position>(); // Modifies filtered type on another entity!
+    otherEntity.Delete<Position>(); // asserts in DEBUG
+}
+foreach (var e in W.Query<All<Position>>().EntitiesFlexible()) {
+    otherEntity.Delete<Position>(); // still asserts in DEBUG
 }
 
-// CORRECT: use Flexible mode
+// CORRECT: defer the mutation until after the loop
+List<W.Entity> toStrip = new();
+foreach (var e in W.Query<All<Position>>().Entities()) {
+    if (ShouldStrip(otherEntity)) toStrip.Add(otherEntity);
+}
+foreach (var e in toStrip) e.Delete<Position>();
+```
+
+### Entity-level operations on other snapshot entities — Flexible only
+Destroying, disabling, or enabling **another snapshot** entity during iteration is forbidden in Strict (asserts in DEBUG) but allowed in Flexible, where the cached bitmask is updated so the affected entity is skipped for the rest of the loop.
+```csharp
+// WRONG in Strict:
+foreach (var e in W.Query<All<Position>>().Entities()) {
+    otherEntity.Destroy(); // asserts in DEBUG (otherEntity is in the snapshot)
+}
+
+// CORRECT in Flexible:
 foreach (var e in W.Query<All<Position>>().EntitiesFlexible()) {
-    otherEntity.Delete<Position>(); // OK in Flexible mode
+    otherEntity.Destroy();  // OK — excluded from the remaining iteration
+    otherEntity.Disable();  // OK
+    otherEntity.Enable();   // OK
 }
 ```
 
@@ -5457,7 +5641,7 @@ foreach (var e in W.Query<All<Position>>().EntitiesFlexible()) {
 During `ForParallel`, only modify the CURRENT entity's data. Do not create/destroy entities, modify other entities, or perform structural changes.
 
 ### Unnecessary Flexible mode
-Flexible mode re-checks bitmasks on every entity, making it significantly slower than Strict. Only use Flexible when you actually need to modify filtered types on other entities during iteration.
+Flexible mode re-reads the cached bitmask on every step, making it slower than Strict. Use Flexible only when you actually need to `Destroy` / `Disable` / `Enable` other snapshot entities during iteration — that is the only extra freedom it provides. Creating new entities and configuring them inside the loop does NOT require Flexible: new entities are not part of the snapshot in either mode.
 
 ___
 

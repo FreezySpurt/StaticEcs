@@ -424,8 +424,8 @@ namespace FFS.Libraries.StaticEcs {
                 QueryFunctionStructAdapter<T0, TFunction> adapter;
                 adapter.Function = function;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, QueryFunctionStructAdapter<T0, TFunction>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, QueryFunctionStructAdapter<T0, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 new WorldQuery<TFilter>(Filter).ForInternal<T0, QueryFunctionStructAdapter<T0, TFunction>>(ref adapter,
@@ -444,8 +444,8 @@ namespace FFS.Libraries.StaticEcs {
                 QueryFunctionStructAdapter<T0, TFunction> adapter;
                 adapter.Function = function;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, QueryFunctionStructAdapter<T0, TFunction>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, QueryFunctionStructAdapter<T0, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 new WorldQuery<TFilter>(Filter).ForInternal<T0, QueryFunctionStructAdapter<T0, TFunction>>(ref adapter,
@@ -476,7 +476,7 @@ namespace FFS.Libraries.StaticEcs {
                                                uint workersLimit = 0)
                 where TFunction : struct, IQuery.Write<T0> {
                 if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionStructAdapter<T0, TFunction>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionStructAdapter<T0, TFunction>>>.Value;
                     data.Value.Function = function;
                     #if FFS_ECS_DEBUG
                     try
@@ -526,8 +526,8 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1> {
                     QueryFunctionStructAdapterW1R1<T0, T1, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, QueryFunctionStructAdapterW1R1<T0, T1, TFunction>, ChangedTracker<T0>>(ref adapter,
-                        new ChangedTracker<T0>(0),
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, QueryFunctionStructAdapterW1R1<T0, T1, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                        new ChangedTracker<TWorld, T0>(0),
                         entities, components, queryMode, clusters);
                 }
 
@@ -541,8 +541,8 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1> {
                     QueryFunctionStructAdapterW1R1<T0, T1, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, QueryFunctionStructAdapterW1R1<T0, T1, TFunction>, ChangedTracker<T0>>(ref adapter,
-                        new ChangedTracker<T0>(0),
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, QueryFunctionStructAdapterW1R1<T0, T1, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                        new ChangedTracker<TWorld, T0>(0),
                         entities, components, queryMode, clusters);
                     function = adapter.Function;
                 }
@@ -569,7 +569,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQuery.Write<T0>.Read<T1> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<QueryFunctionStructAdapterW1R1<T0, T1, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<QueryFunctionStructAdapterW1R1<T0, T1, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -621,8 +621,8 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2> {
                     QueryFunctionStructAdapterW1R2<T0, T1, T2, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, QueryFunctionStructAdapterW1R2<T0, T1, T2, TFunction>, ChangedTracker<T0>>(ref adapter,
-                        new ChangedTracker<T0>(0),
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, QueryFunctionStructAdapterW1R2<T0, T1, T2, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                        new ChangedTracker<TWorld, T0>(0),
                         entities, components, queryMode, clusters);
                 }
 
@@ -636,8 +636,8 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2> {
                     QueryFunctionStructAdapterW1R2<T0, T1, T2, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, QueryFunctionStructAdapterW1R2<T0, T1, T2, TFunction>, ChangedTracker<T0>>(ref adapter,
-                        new ChangedTracker<T0>(0),
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, QueryFunctionStructAdapterW1R2<T0, T1, T2, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                        new ChangedTracker<TWorld, T0>(0),
                         entities, components, queryMode, clusters);
                     function = adapter.Function;
                 }
@@ -664,7 +664,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1, T2>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<QueryFunctionStructAdapterW1R2<T0, T1, T2, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<QueryFunctionStructAdapterW1R2<T0, T1, T2, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -717,7 +717,7 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2, T3> {
                     QueryFunctionStructAdapterW1R3<T0, T1, T2, T3, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, QueryFunctionStructAdapterW1R3<T0, T1, T2, T3, TFunction>, ChangedTracker<T0>>(ref adapter, new ChangedTracker<T0>(0), entities, components, queryMode, clusters);
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, QueryFunctionStructAdapterW1R3<T0, T1, T2, T3, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter, new ChangedTracker<TWorld, T0>(0), entities, components, queryMode, clusters);
                 }
 
                 /// <summary>Iterates over matching entities, invoking the struct function for each.</summary>
@@ -730,7 +730,7 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2, T3> {
                     QueryFunctionStructAdapterW1R3<T0, T1, T2, T3, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, QueryFunctionStructAdapterW1R3<T0, T1, T2, T3, TFunction>, ChangedTracker<T0>>(ref adapter, new ChangedTracker<T0>(0), entities, components, queryMode, clusters);
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, QueryFunctionStructAdapterW1R3<T0, T1, T2, T3, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter, new ChangedTracker<TWorld, T0>(0), entities, components, queryMode, clusters);
                     function = adapter.Function;
                 }
 
@@ -756,7 +756,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2, T3> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1, T2, T3>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<QueryFunctionStructAdapterW1R3<T0, T1, T2, T3, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<QueryFunctionStructAdapterW1R3<T0, T1, T2, T3, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -810,7 +810,7 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2, T3, T4> {
                     QueryFunctionStructAdapterW1R4<T0, T1, T2, T3, T4, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, T4, QueryFunctionStructAdapterW1R4<T0, T1, T2, T3, T4, TFunction>, ChangedTracker<T0>>(ref adapter, new ChangedTracker<T0>(0), entities, components, queryMode, clusters);
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, T4, QueryFunctionStructAdapterW1R4<T0, T1, T2, T3, T4, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter, new ChangedTracker<TWorld, T0>(0), entities, components, queryMode, clusters);
                 }
 
                 /// <summary>Iterates over matching entities, invoking the struct function for each.</summary>
@@ -823,7 +823,7 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2, T3, T4> {
                     QueryFunctionStructAdapterW1R4<T0, T1, T2, T3, T4, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, T4, QueryFunctionStructAdapterW1R4<T0, T1, T2, T3, T4, TFunction>, ChangedTracker<T0>>(ref adapter, new ChangedTracker<T0>(0), entities, components, queryMode, clusters);
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, T4, QueryFunctionStructAdapterW1R4<T0, T1, T2, T3, T4, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter, new ChangedTracker<TWorld, T0>(0), entities, components, queryMode, clusters);
                     function = adapter.Function;
                 }
 
@@ -849,7 +849,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2, T3, T4> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1, T2, T3, T4>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<QueryFunctionStructAdapterW1R4<T0, T1, T2, T3, T4, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<QueryFunctionStructAdapterW1R4<T0, T1, T2, T3, T4, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -904,7 +904,7 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2, T3, T4, T5> {
                     QueryFunctionStructAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, T4, T5, QueryFunctionStructAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>, ChangedTracker<T0>>(ref adapter, new ChangedTracker<T0>(0), entities, components, queryMode, clusters);
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, T4, T5, QueryFunctionStructAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter, new ChangedTracker<TWorld, T0>(0), entities, components, queryMode, clusters);
                 }
 
                 /// <summary>Iterates over matching entities, invoking the struct function for each.</summary>
@@ -917,7 +917,7 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2, T3, T4, T5> {
                     QueryFunctionStructAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, T4, T5, QueryFunctionStructAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>, ChangedTracker<T0>>(ref adapter, new ChangedTracker<T0>(0), entities, components, queryMode, clusters);
+                    new WorldQuery<TFilter>(Filter).ForInternalTracked<T0, T1, T2, T3, T4, T5, QueryFunctionStructAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter, new ChangedTracker<TWorld, T0>(0), entities, components, queryMode, clusters);
                     function = adapter.Function;
                 }
 
@@ -943,7 +943,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQuery.Write<T0>.Read<T1, T2, T3, T4, T5> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1, T2, T3, T4, T5>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<QueryFunctionStructAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<QueryFunctionStructAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -1070,7 +1070,7 @@ namespace FFS.Libraries.StaticEcs {
                                                uint workersLimit = 0)
                 where TFunction : struct, IQuery.Read<T0> {
                 if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionStructAdapterRead<T0, TFunction>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionStructAdapterRead<T0, TFunction>>>.Value;
                     data.Value.Function = function;
                     #if FFS_ECS_DEBUG
                     try
@@ -1123,8 +1123,8 @@ namespace FFS.Libraries.StaticEcs {
                 BlockAdapterWrite<T0, TFunction> adapter;
                 adapter.Function = function;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, BlockAdapterWrite<T0, TFunction>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, BlockAdapterWrite<T0, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, clusters);
                 #else
                 new WorldQuery<TFilter>(Filter).ForBlockInternal<T0, BlockAdapterWrite<T0, TFunction>>(ref adapter,
@@ -1142,8 +1142,8 @@ namespace FFS.Libraries.StaticEcs {
                 BlockAdapterWrite<T0, TFunction> adapter;
                 adapter.Function = function;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, BlockAdapterWrite<T0, TFunction>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, BlockAdapterWrite<T0, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, clusters);
                 #else
                 new WorldQuery<TFilter>(Filter).ForBlockInternal<T0, BlockAdapterWrite<T0, TFunction>>(ref adapter,
@@ -1174,7 +1174,7 @@ namespace FFS.Libraries.StaticEcs {
                                                uint workersLimit = 0)
                 where TFunction : struct, IQueryBlock.Write<T0> {
                 if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<BlockAdapterWrite<T0, TFunction>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<BlockAdapterWrite<T0, TFunction>>>.Value;
                     data.Value.Function = function;
                     #if FFS_ECS_DEBUG
                     try
@@ -1223,7 +1223,7 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQueryBlock.Write<T0>.Read<T1> {
                     BlockAdapterW1R1<T0, T1, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, T1, BlockAdapterW1R1<T0, T1, TFunction>, ChangedTracker<T0>>(ref adapter, new ChangedTracker<T0>(0), entities, components, clusters);
+                    new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, T1, BlockAdapterW1R1<T0, T1, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter, new ChangedTracker<TWorld, T0>(0), entities, components, clusters);
                 }
 
                 /// <summary>Iterates over matching entities, invoking the struct function for each.</summary>
@@ -1235,7 +1235,7 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQueryBlock.Write<T0>.Read<T1> {
                     BlockAdapterW1R1<T0, T1, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, T1, BlockAdapterW1R1<T0, T1, TFunction>, ChangedTracker<T0>>(ref adapter, new ChangedTracker<T0>(0), entities, components, clusters);
+                    new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, T1, BlockAdapterW1R1<T0, T1, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter, new ChangedTracker<TWorld, T0>(0), entities, components, clusters);
                     function = adapter.Function;
                 }
 
@@ -1261,7 +1261,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQueryBlock.Write<T0>.Read<T1> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<BlockAdapterW1R1<T0, T1, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<BlockAdapterW1R1<T0, T1, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -1312,8 +1312,8 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQueryBlock.Write<T0>.Read<T1, T2> {
                     BlockAdapterW1R2<T0, T1, T2, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, T1, T2, BlockAdapterW1R2<T0, T1, T2, TFunction>, ChangedTracker<T0>>(ref adapter,
-                            new ChangedTracker<T0>(0),
+                    new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, T1, T2, BlockAdapterW1R2<T0, T1, T2, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                            new ChangedTracker<TWorld, T0>(0),
                             entities, components, clusters);
                 }
 
@@ -1326,8 +1326,8 @@ namespace FFS.Libraries.StaticEcs {
                     where TFunction : struct, IQueryBlock.Write<T0>.Read<T1, T2> {
                     BlockAdapterW1R2<T0, T1, T2, TFunction> adapter;
                     adapter.Function = function;
-                    new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, T1, T2, BlockAdapterW1R2<T0, T1, T2, TFunction>, ChangedTracker<T0>>(ref adapter,
-                            new ChangedTracker<T0>(0),
+                    new WorldQuery<TFilter>(Filter).ForBlockInternalTracked<T0, T1, T2, BlockAdapterW1R2<T0, T1, T2, TFunction>, ChangedTracker<TWorld, T0>>(ref adapter,
+                            new ChangedTracker<TWorld, T0>(0),
                             entities, components, clusters);
                     function = adapter.Function;
                 }
@@ -1354,7 +1354,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQueryBlock.Write<T0>.Read<T1, T2> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1, T2>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<BlockAdapterW1R2<T0, T1, T2, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<BlockAdapterW1R2<T0, T1, T2, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -1407,9 +1407,9 @@ namespace FFS.Libraries.StaticEcs {
                     BlockAdapterW1R3<T0, T1, T2, T3, TFunction> adapter;
                     adapter.Function = function;
                     new WorldQuery<TFilter>(Filter).ForBlockInternal<T0, T1, T2, T3, BlockAdapterW1R3<T0, T1, T2, T3, TFunction>
-                            , ChangedTracker<T0>
+                            , ChangedTracker<TWorld, T0>
                         >(ref adapter,
-                            new ChangedTracker<T0>(0),
+                            new ChangedTracker<TWorld, T0>(0),
                             entities, components, clusters);
                 }
 
@@ -1423,9 +1423,9 @@ namespace FFS.Libraries.StaticEcs {
                     BlockAdapterW1R3<T0, T1, T2, T3, TFunction> adapter;
                     adapter.Function = function;
                     new WorldQuery<TFilter>(Filter).ForBlockInternal<T0, T1, T2, T3, BlockAdapterW1R3<T0, T1, T2, T3, TFunction>
-                            , ChangedTracker<T0>
+                            , ChangedTracker<TWorld, T0>
                         >(ref adapter,
-                            new ChangedTracker<T0>(0),
+                            new ChangedTracker<TWorld, T0>(0),
                             entities, components, clusters);
                     function = adapter.Function;
                 }
@@ -1452,7 +1452,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQueryBlock.Write<T0>.Read<T1, T2, T3> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1, T2, T3>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<BlockAdapterW1R3<T0, T1, T2, T3, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<BlockAdapterW1R3<T0, T1, T2, T3, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -1506,9 +1506,9 @@ namespace FFS.Libraries.StaticEcs {
                     BlockAdapterW1R4<T0, T1, T2, T3, T4, TFunction> adapter;
                     adapter.Function = function;
                     new WorldQuery<TFilter>(Filter).ForBlockInternal<T0, T1, T2, T3, T4, BlockAdapterW1R4<T0, T1, T2, T3, T4, TFunction>
-                            , ChangedTracker<T0>
+                            , ChangedTracker<TWorld, T0>
                         >(ref adapter,
-                            new ChangedTracker<T0>(0),
+                            new ChangedTracker<TWorld, T0>(0),
                             entities, components, clusters);
                 }
 
@@ -1522,9 +1522,9 @@ namespace FFS.Libraries.StaticEcs {
                     BlockAdapterW1R4<T0, T1, T2, T3, T4, TFunction> adapter;
                     adapter.Function = function;
                     new WorldQuery<TFilter>(Filter).ForBlockInternal<T0, T1, T2, T3, T4, BlockAdapterW1R4<T0, T1, T2, T3, T4, TFunction>
-                            , ChangedTracker<T0>
+                            , ChangedTracker<TWorld, T0>
                         >(ref adapter,
-                            new ChangedTracker<T0>(0),
+                            new ChangedTracker<TWorld, T0>(0),
                             entities, components, clusters);
                     function = adapter.Function;
                 }
@@ -1551,7 +1551,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQueryBlock.Write<T0>.Read<T1, T2, T3, T4> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1, T2, T3, T4>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<BlockAdapterW1R4<T0, T1, T2, T3, T4, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<BlockAdapterW1R4<T0, T1, T2, T3, T4, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -1606,9 +1606,9 @@ namespace FFS.Libraries.StaticEcs {
                     BlockAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction> adapter;
                     adapter.Function = function;
                     new WorldQuery<TFilter>(Filter).ForBlockInternal<T0, T1, T2, T3, T4, T5, BlockAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>
-                            , ChangedTracker<T0>
+                            , ChangedTracker<TWorld, T0>
                         >(ref adapter,
-                            new ChangedTracker<T0>(0),
+                            new ChangedTracker<TWorld, T0>(0),
                             entities, components, clusters);
                 }
 
@@ -1622,9 +1622,9 @@ namespace FFS.Libraries.StaticEcs {
                     BlockAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction> adapter;
                     adapter.Function = function;
                     new WorldQuery<TFilter>(Filter).ForBlockInternal<T0, T1, T2, T3, T4, T5, BlockAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>
-                            , ChangedTracker<T0>
+                            , ChangedTracker<TWorld, T0>
                         >(ref adapter,
-                            new ChangedTracker<T0>(0),
+                            new ChangedTracker<TWorld, T0>(0),
                             entities, components, clusters);
                     function = adapter.Function;
                 }
@@ -1651,7 +1651,7 @@ namespace FFS.Libraries.StaticEcs {
                                                    uint workersLimit = 0)
                     where TFunction : struct, IQueryBlock.Write<T0>.Read<T1, T2, T3, T4, T5> {
                     if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0, T1, T2, T3, T4, T5>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                        ref var data = ref Resources<ParallelData<BlockAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>>>.Value;
+                        ref var data = ref Resources<TWorld, ParallelData<BlockAdapterW1R5<T0, T1, T2, T3, T4, T5, TFunction>>>.Value;
                         data.Value.Function = function;
                         #if FFS_ECS_DEBUG
                         try
@@ -1776,7 +1776,7 @@ namespace FFS.Libraries.StaticEcs {
                                                uint workersLimit = 0)
                 where TFunction : struct, IQueryBlock.Read<T0> {
                 if (new WorldQuery<TFilter>(Filter).PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<BlockAdapterRead<T0, TFunction>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<BlockAdapterRead<T0, TFunction>>>.Value;
                     data.Value.Function = function;
                     #if FFS_ECS_DEBUG
                     try
@@ -1852,116 +1852,13 @@ namespace FFS.Libraries.StaticEcs {
             #endif // !FFS_ECS_DISABLE_CHANGED_TRACKING
 
             #region DELEGATE SEARCH
+            /// <inheritdoc cref="Search{T0}(out Entity, SearchFunctionWithEntity{TWorld,T0}, EntityStatusType, ComponentStatus, QueryMode, ReadOnlySpan{ushort})"/>
             [MethodImpl(AggressiveInlining)]
             public bool Search<T0>(out Entity entity,
-                                   SearchFunctionWithEntity<TWorld, T0> function,
-                                   EntityStatusType entities = EntityStatusType.Enabled,
-                                   ComponentStatus components = ComponentStatus.Enabled,
-                                   QueryMode queryMode = QueryMode.Strict,
-                                   ReadOnlySpan<ushort> clusters = default)
-                where T0 : struct, IComponent {
-                return queryMode == QueryMode.Strict
-                    ? SearchStrict(out entity, function, entities, components, clusters)
-                    : SearchFlexible(out entity, function, entities, components, clusters);
-            }
-            
-            /// <inheritdoc cref="Search{T0}(out Entity, SearchFunctionWithEntity{TWorld,T0}, EntityStatusType, ComponentStatus, QueryMode, ReadOnlySpan{ushort})"/>
-            [MethodImpl(AggressiveInlining)]
-            internal bool SearchFlexible<T0>(out Entity entity,
-                                             SearchFunctionWithEntity<TWorld, T0> function,
-                                             EntityStatusType entities = EntityStatusType.Enabled,
-                                             ComponentStatus components = ComponentStatus.Enabled,
-                                             ReadOnlySpan<ushort> clusters = default)
-                where T0 : struct, IComponent {
-                var result = false;
-                entity = new Entity();
-                ref var entityId = ref entity.IdWithOffset;
-
-                if (PrepareFlexible<T0>(Filter, clusters, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
-                    #if FFS_ECS_DEBUG
-                    try
-                    #endif
-                    {
-                        var segments0 = Components<T0>.Instance.ComponentSegments;
-
-                        #if !NET6_0_OR_GREATER
-                        var deBruijn = Utils.DeBruijn;
-                        #endif
-
-                        T0[] components0 = null;
-
-                        var blocks = queryData.Blocks;
-                        var segmentIdx = uint.MaxValue;
-
-                        do {
-                            var curSegmentIdx = firstGlobalBlockIdx >> Const.BLOCKS_IN_SEGMENT_SHIFT;
-                            if (curSegmentIdx != segmentIdx) {
-                                segmentIdx = (uint)curSegmentIdx;
-                                components0 = segments0[segmentIdx];
-                            }
-
-                            var chunkBlockEntityId = (uint)(firstGlobalBlockIdx << Const.ENTITIES_IN_BLOCK_SHIFT);
-                            ref var block = ref blocks[firstGlobalBlockIdx];
-                            ref var entitiesMaskRef = ref block.EntitiesMask;
-                            firstGlobalBlockIdx = block.NextGlobalBlock;
-                            var entitiesMask = entitiesMaskRef;
-                            var componentOffset = chunkBlockEntityId & Const.ENTITIES_IN_SEGMENT_MASK;
-                            chunkBlockEntityId += Const.ENTITY_ID_OFFSET;
-
-                            do {
-                                var isolatedBit = entitiesMask & (ulong)-(long)entitiesMask;
-                                #if NET6_0_OR_GREATER
-                                var runStart = (byte)System.Numerics.BitOperations.TrailingZeroCount(entitiesMask);
-                                #else
-                                var runStart = deBruijn[(uint)((isolatedBit * 0x37E84A99DAE458FUL) >> 58)];
-                                #endif
-
-                                var componentIdx = runStart + componentOffset;
-                                entityId = chunkBlockEntityId + runStart;
-
-                                do {
-                                    #if FFS_ECS_DEBUG
-                                    Data.Instance.SetCurrentQueryEntity(entityId);
-                                    #endif
-                                    if (function.Invoke(
-                                            entity,
-                                            in components0[componentIdx]
-                                        )) {
-                                        result = true;
-                                        goto EXIT;
-                                    }
-
-                                    isolatedBit <<= 1;
-                                    componentIdx++;
-                                    entityId++;
-                                } while ((entitiesMaskRef & isolatedBit) != 0);
-
-                                entitiesMask = entitiesMaskRef & ~(isolatedBit - 1);
-                            } while (entitiesMask != 0);
-                        } while (firstGlobalBlockIdx >= 0);
-
-                        EXIT: ;
-                    }
-
-                    #if FFS_ECS_DEBUG
-                    finally
-                    #endif
-                    {
-                        Data.Instance.PopCurrentQuery(queryData);
-                        DisposeFlexible<T0>(Filter, entities, components, queryData);
-                    }
-                }
-
-                return result;
-            }
-            
-            /// <inheritdoc cref="Search{T0}(out Entity, SearchFunctionWithEntity{TWorld,T0}, EntityStatusType, ComponentStatus, QueryMode, ReadOnlySpan{ushort})"/>
-            [MethodImpl(AggressiveInlining)]
-            internal bool SearchStrict<T0>(out Entity entity,
-                                           SearchFunctionWithEntity<TWorld, T0> function,
-                                           EntityStatusType entities = EntityStatusType.Enabled,
-                                           ComponentStatus components = ComponentStatus.Enabled,
-                                           ReadOnlySpan<ushort> clusters = default)
+                                     SearchFunctionWithEntity<TWorld, T0> function,
+                                     EntityStatusType entities = EntityStatusType.Enabled,
+                                     ComponentStatus components = ComponentStatus.Enabled,
+                                     ReadOnlySpan<ushort> clusters = default)
                 where T0 : struct, IComponent {
                 ref var world = ref Data.Instance;
 
@@ -1969,7 +1866,7 @@ namespace FFS.Libraries.StaticEcs {
                 entity = new Entity();
                 ref var entityId = ref entity.IdWithOffset;
 
-                if (PrepareStrict<T0>(Filter, clusters, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
+                if (Prepare<T0>(Filter, clusters, QueryMode.Strict, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -2090,8 +1987,8 @@ namespace FFS.Libraries.StaticEcs {
                 adapter.Function = function;
                 adapter.UserData = userData;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                ForInternalTracked<T0, QueryFunctionWithDataEntityAdapter<TData, T0>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                ForInternalTracked<T0, QueryFunctionWithDataEntityAdapter<TData, T0>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 ForInternal<T0, QueryFunctionWithDataEntityAdapter<TData, T0>>(ref adapter,
@@ -2112,8 +2009,8 @@ namespace FFS.Libraries.StaticEcs {
                 adapter.Function = function;
                 adapter.UserData = userData;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                ForInternalTracked<T0, QueryFunctionWithDataEntityAdapter<TData, T0>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                ForInternalTracked<T0, QueryFunctionWithDataEntityAdapter<TData, T0>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 ForInternal<T0, QueryFunctionWithDataEntityAdapter<TData, T0>>(ref adapter,
@@ -2150,7 +2047,7 @@ namespace FFS.Libraries.StaticEcs {
                                                uint workersLimit = 0)
                 where T0 : struct, IComponent {
                 if (PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionWithDataEntityAdapter<TData, T0>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionWithDataEntityAdapter<TData, T0>>>.Value;
                     data.Value.Function = function;
                     data.Value.UserData = userData;
                     #if FFS_ECS_DEBUG
@@ -2196,8 +2093,8 @@ namespace FFS.Libraries.StaticEcs {
                 QueryFunctionWithEntityAdapter<T0> adapter;
                 adapter.Function = function;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                ForInternalTracked<T0, QueryFunctionWithEntityAdapter<T0>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                ForInternalTracked<T0, QueryFunctionWithEntityAdapter<T0>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 ForInternal<T0, QueryFunctionWithEntityAdapter<T0>>(ref adapter,
@@ -2215,7 +2112,7 @@ namespace FFS.Libraries.StaticEcs {
                                         uint workersLimit = 0)
                 where T0 : struct, IComponent {
                 if (PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionWithEntityAdapter<T0>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionWithEntityAdapter<T0>>>.Value;
                     data.Value.Function = function;
                     #if FFS_ECS_DEBUG
                     try
@@ -2265,8 +2162,8 @@ namespace FFS.Libraries.StaticEcs {
                 adapter.Function = function;
                 adapter.UserData = userData;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                ForInternalTracked<T0, QueryFunctionWithDataAdapter<TData, T0>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                ForInternalTracked<T0, QueryFunctionWithDataAdapter<TData, T0>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 ForInternal<T0, QueryFunctionWithDataAdapter<TData, T0>>(ref adapter,
@@ -2287,8 +2184,8 @@ namespace FFS.Libraries.StaticEcs {
                 adapter.Function = function;
                 adapter.UserData = userData;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                ForInternalTracked<T0, QueryFunctionWithDataAdapter<TData, T0>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                ForInternalTracked<T0, QueryFunctionWithDataAdapter<TData, T0>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 ForInternal<T0, QueryFunctionWithDataAdapter<TData, T0>>(ref adapter,
@@ -2325,7 +2222,7 @@ namespace FFS.Libraries.StaticEcs {
                                                uint workersLimit = 0)
                 where T0 : struct, IComponent {
                 if (PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionWithDataAdapter<TData, T0>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionWithDataAdapter<TData, T0>>>.Value;
                     data.Value.Function = function;
                     data.Value.UserData = userData;
                     #if FFS_ECS_DEBUG
@@ -2371,8 +2268,8 @@ namespace FFS.Libraries.StaticEcs {
                 QueryFunctionAdapter<T0> adapter;
                 adapter.Function = function;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                ForInternalTracked<T0, QueryFunctionAdapter<T0>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                ForInternalTracked<T0, QueryFunctionAdapter<T0>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 ForInternal<T0, QueryFunctionAdapter<T0>>(ref adapter,
@@ -2390,7 +2287,7 @@ namespace FFS.Libraries.StaticEcs {
                                         uint workersLimit = 0)
                 where T0 : struct, IComponent {
                 if (PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionAdapter<T0>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionAdapter<T0>>>.Value;
                     data.Value.Function = function;
                     #if FFS_ECS_DEBUG
                     try
@@ -2434,8 +2331,8 @@ namespace FFS.Libraries.StaticEcs {
                 QueryUnsafeFunctionAdapter<T0> adapter;
                 adapter.Function = function;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                ForInternalTracked<T0, QueryUnsafeFunctionAdapter<T0>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                ForInternalTracked<T0, QueryUnsafeFunctionAdapter<T0>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 ForInternal<T0, QueryUnsafeFunctionAdapter<T0>>(ref adapter,
@@ -2454,8 +2351,8 @@ namespace FFS.Libraries.StaticEcs {
                 QueryUnsafeFunctionWithEntityAdapter<T0> adapter;
                 adapter.Function = function;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                ForInternalTracked<T0, QueryUnsafeFunctionWithEntityAdapter<T0>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                ForInternalTracked<T0, QueryUnsafeFunctionWithEntityAdapter<T0>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, queryMode, clusters);
                 #else
                 ForInternal<T0, QueryUnsafeFunctionWithEntityAdapter<T0>>(ref adapter,
@@ -2543,7 +2440,7 @@ namespace FFS.Libraries.StaticEcs {
                                                uint workersLimit = 0)
                 where T0 : struct, IComponent {
                 if (PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionWithDataEntityAdapterRead<TData, T0>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionWithDataEntityAdapterRead<TData, T0>>>.Value;
                     data.Value.Function = function;
                     data.Value.UserData = userData;
                     #if FFS_ECS_DEBUG
@@ -2608,7 +2505,7 @@ namespace FFS.Libraries.StaticEcs {
                                         uint workersLimit = 0)
                 where T0 : struct, IComponent {
                 if (PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionWithEntityAdapterRead<T0>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionWithEntityAdapterRead<T0>>>.Value;
                     data.Value.Function = function;
                     #if FFS_ECS_DEBUG
                     try
@@ -2718,7 +2615,7 @@ namespace FFS.Libraries.StaticEcs {
                                                uint workersLimit = 0)
                 where T0 : struct, IComponent {
                 if (PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionWithDataAdapterRead<TData, T0>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionWithDataAdapterRead<TData, T0>>>.Value;
                     data.Value.Function = function;
                     data.Value.UserData = userData;
                     #if FFS_ECS_DEBUG
@@ -2783,7 +2680,7 @@ namespace FFS.Libraries.StaticEcs {
                                         uint workersLimit = 0)
                 where T0 : struct, IComponent {
                 if (PrepareParallel<T0>(Filter, clusters, entities, components, out var count, out var jobs, out var jobIndexes)) {
-                    ref var data = ref Resources<ParallelData<QueryFunctionAdapterRead<T0>>>.Value;
+                    ref var data = ref Resources<TWorld, ParallelData<QueryFunctionAdapterRead<T0>>>.Value;
                     data.Value.Function = function;
                     #if FFS_ECS_DEBUG
                     try
@@ -2826,8 +2723,8 @@ namespace FFS.Libraries.StaticEcs {
                 BlockUnsafeAdapter<T0> adapter;
                 adapter.Function = function;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                ForBlockInternalTracked<T0, BlockUnsafeAdapter<T0>, ChangedTracker<T0>>(ref adapter,
-                    new ChangedTracker<T0>(0),
+                ForBlockInternalTracked<T0, BlockUnsafeAdapter<T0>, ChangedTracker<TWorld, T0>>(ref adapter,
+                    new ChangedTracker<TWorld, T0>(0),
                     entities, components, clusters);
                 #else
                 ForBlockInternal<T0, BlockUnsafeAdapter<T0>>(ref adapter,
@@ -2844,7 +2741,7 @@ namespace FFS.Libraries.StaticEcs {
                 where T0 : unmanaged, IComponent
                 where TAdapter : struct, IBlockQueryAdapter<T0>
                 {
-                if (PrepareStrict<T0>(Filter, clusters, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
+                if (Prepare<T0>(Filter, clusters, QueryMode.Strict, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
                     ref var world = ref Data.Instance;
                     #if FFS_ECS_DEBUG
                     try
@@ -2940,9 +2837,9 @@ namespace FFS.Libraries.StaticEcs {
                 ReadOnlySpan<ushort> clusters)
                 where T0 : unmanaged, IComponent
                 where TAdapter : struct, IBlockQueryAdapter<T0>
-                where TTracker : struct, IChangedTracker
+                where TTracker : struct, IChangedTracker<TWorld>
                 {
-                if (PrepareStrict<T0>(Filter, clusters, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
+                if (Prepare<T0>(Filter, clusters, QueryMode.Strict, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
                     ref var world = ref Data.Instance;
                     #if FFS_ECS_DEBUG
                     try
@@ -3041,7 +2938,7 @@ namespace FFS.Libraries.StaticEcs {
                 ReadOnlySpan<ushort> clusters)
                 where T0 : unmanaged, IComponent
                 where TAdapter : struct, IBlockQueryAdapter<T0>
-                where TTracker : struct, IChangedTracker
+                where TTracker : struct, IChangedTracker<TWorld>
             {
                 if (tracker.IsActive) {
                     ForBlockInternal<T0, TAdapter, TTracker>(ref adapter, tracker, entities, components, clusters);
@@ -3063,9 +2960,9 @@ namespace FFS.Libraries.StaticEcs {
                 var deBruijn = Utils.DeBruijn;
                 #endif
 
-                ref var adapter = ref Resources<ParallelData<TAdapter>>.Value.Value;
+                ref var adapter = ref Resources<TWorld, ParallelData<TAdapter>>.Value.Value;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                var tracker = new ChangedTracker<T0>(0);
+                var tracker = new ChangedTracker<TWorld, T0>(0);
                 var hasTracking = tracker.IsActive;
                 #endif
                 EntityBlock entityBlock = default;
@@ -3149,7 +3046,7 @@ namespace FFS.Libraries.StaticEcs {
                 where T0 : struct, IComponent
                 where TFunction : struct, IQueryFunctionAdapter<T0>
             {
-                if (PrepareFlexible<T0>(Filter, clusters, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
+                if (Prepare<T0>(Filter, clusters, QueryMode.Flexible, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -3226,7 +3123,7 @@ namespace FFS.Libraries.StaticEcs {
                 where T0 : struct, IComponent
                 where TFunction : struct, IQueryFunctionAdapter<T0>
             {
-                if (PrepareStrict<T0>(Filter, clusters, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
+                if (Prepare<T0>(Filter, clusters, QueryMode.Strict, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -3329,9 +3226,9 @@ namespace FFS.Libraries.StaticEcs {
                                                                        ReadOnlySpan<ushort> clusters = default)
                 where T0 : struct, IComponent
                 where TFunction : struct, IQueryFunctionAdapter<T0>
-                where TTracker : struct, IChangedTracker
+                where TTracker : struct, IChangedTracker<TWorld>
             {
-                if (PrepareFlexible<T0>(Filter, clusters, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
+                if (Prepare<T0>(Filter, clusters, QueryMode.Flexible, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -3414,9 +3311,9 @@ namespace FFS.Libraries.StaticEcs {
                                                                      ReadOnlySpan<ushort> clusters = default)
                 where T0 : struct, IComponent
                 where TFunction : struct, IQueryFunctionAdapter<T0>
-                where TTracker : struct, IChangedTracker
+                where TTracker : struct, IChangedTracker<TWorld>
             {
-                if (PrepareStrict<T0>(Filter, clusters, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
+                if (Prepare<T0>(Filter, clusters, QueryMode.Strict, entities, components, out var queryData, out var firstGlobalBlockIdx)) {
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -3523,7 +3420,7 @@ namespace FFS.Libraries.StaticEcs {
                 ReadOnlySpan<ushort> clusters = default)
                 where T0 : struct, IComponent
                 where TFunction : struct, IQueryFunctionAdapter<T0>
-                where TTracker : struct, IChangedTracker
+                where TTracker : struct, IChangedTracker<TWorld>
             {
                 if (tracker.IsActive) {
                     if (queryMode == QueryMode.Strict) {
@@ -3572,9 +3469,9 @@ namespace FFS.Libraries.StaticEcs {
 
                 T0[] comp0;
 
-                ref var function = ref Resources<ParallelData<TFunction>>.Value.Value;
+                ref var function = ref Resources<TWorld, ParallelData<TFunction>>.Value.Value;
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                var tracker = new ChangedTracker<T0>(0);
+                var tracker = new ChangedTracker<TWorld, T0>(0);
                 var hasTracking = tracker.IsActive;
                 #endif
                 var entity = new Entity();
@@ -3659,140 +3556,10 @@ namespace FFS.Libraries.StaticEcs {
             [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Type metadata is preserved by the registration path.")]
             #endif
             [MethodImpl(AggressiveInlining)]
-            internal bool PrepareFlexible<T0>(TFilter filter, ReadOnlySpan<ushort> clusters, EntityStatusType entities, ComponentStatus components, out QueryData queryData, out int firstGlobalBlockIdx)
+            internal bool Prepare<T0>(TFilter filter, ReadOnlySpan<ushort> clusters, QueryMode mode, EntityStatusType entities, ComponentStatus components, out QueryData queryData, out int firstGlobalBlockIdx)
                 where T0 : struct, IComponent {
                 #if FFS_ECS_DEBUG
                 AssertNotNestedParallelQuery(WorldTypeName);
-                AssertRegisteredComponent<T0>(Components<T0>.ComponentsTypeName);
-                filter.Assert<TWorld>();
-                #endif
-
-
-                ref var world = ref Data.Instance;
-                ref var pool0 = ref Components<T0>.Instance;
-
-                clusters = world.GetActiveClustersIfEmpty(clusters);
-                queryData = default;
-                BlockMaskCache[] filteredBlocks = null;
-
-                #if !NET6_0_OR_GREATER
-                var deBruijn = Utils.DeBruijn;
-                #endif
-
-                var previousGlobalBlockIdx = -1;
-                firstGlobalBlockIdx = -1;
-
-                for (var i = 0; i < clusters.Length; i++) {
-                    var clusterIdx = clusters[i];
-                    ref var cluster = ref world.Clusters[clusterIdx];
-                    if (cluster.Disabled) {
-                        continue;
-                    }
-
-                    for (uint chunkMapIdx = 0; chunkMapIdx < cluster.LoadedChunksCount; chunkMapIdx++) {
-                        var chunkIdx = cluster.LoadedChunks[chunkMapIdx];
-                        var chunkMask = world.HeuristicChunks[chunkIdx].NotEmptyBlocks.Value
-                                        & pool0.HeuristicChunks[chunkIdx].NotEmptyBlocks.Value;
-                        chunkMask &= filter.FilterChunk<TWorld>(chunkIdx);
-
-                        if (chunkMask != 0) {
-                            var segmentIdx = uint.MaxValue;
-
-                            ulong[] worldMasks = null;
-                            ulong[] pool0Masks = null;
-
-                            do {
-                                #if NET6_0_OR_GREATER
-                                var chunkBlockIdx = (uint)System.Numerics.BitOperations.TrailingZeroCount(chunkMask);
-                                #else
-                                var chunkBlockIdx = (uint)deBruijn[(uint)(((chunkMask & (ulong)-(long)chunkMask) * 0x37E84A99DAE458FUL) >> 58)];
-                                #endif
-                                chunkMask &= chunkMask - 1;
-                                var globalBlockIdx = chunkBlockIdx + (chunkIdx << Const.BLOCKS_IN_CHUNK_SHIFT);
-
-                                var curSegmentIdx = (chunkIdx << Const.SEGMENTS_IN_CHUNK_SHIFT) + (chunkBlockIdx >> Const.BLOCKS_IN_SEGMENT_SHIFT);
-                                if (curSegmentIdx != segmentIdx) {
-                                    segmentIdx = curSegmentIdx;
-                                    worldMasks = world.EntitiesSegments[segmentIdx].Masks;
-                                    pool0Masks = pool0.EntitiesMaskSegments[segmentIdx];
-                                }
-
-                                var blockIdx = (byte)(chunkBlockIdx & Const.BLOCKS_IN_SEGMENT_MASK);
-                                var disabledBlockIdx = blockIdx + Const.BLOCKS_IN_SEGMENT;
-                                var loadedBlockIdx = disabledBlockIdx + Const.BLOCKS_IN_SEGMENT;
-
-                                var entitiesMask = entities switch {
-                                    EntityStatusType.Enabled => worldMasks[loadedBlockIdx] & worldMasks[blockIdx] & ~worldMasks[disabledBlockIdx],
-                                    EntityStatusType.Disabled => worldMasks[loadedBlockIdx] & worldMasks[disabledBlockIdx],
-                                    _ => worldMasks[loadedBlockIdx] & worldMasks[blockIdx]
-                                };
-                                entitiesMask &= components switch {
-                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & ~pool0Masks[disabledBlockIdx],
-                                    ComponentStatus.Disabled => pool0Masks[disabledBlockIdx],
-                                    _ => pool0Masks[blockIdx]
-                                };
-                                entitiesMask &= filter.FilterEntities<TWorld>(segmentIdx, blockIdx);
-
-                                if (entitiesMask != 0) {
-                                    if (previousGlobalBlockIdx >= 0) {
-                                        filteredBlocks[previousGlobalBlockIdx].NextGlobalBlock = (int)globalBlockIdx;
-                                    }
-                                    else {
-                                        #if FFS_ECS_DEBUG
-                                        const int queryMode = 0; // flexible
-                                        AssertSameQueryMode(WorldTypeName, queryMode);
-                                        world.QueryMode = queryMode;
-                                        #endif
-
-                                        queryData = world.PushCurrentQuery();
-
-                                        filter.PushQueryData<TWorld>(queryData);
-                                        world.PushQueryDataForDestroy(queryData);
-
-                                        switch (entities) {
-                                            case EntityStatusType.Enabled: world.PushQueryDataForDisable(queryData); break;
-                                            case EntityStatusType.Disabled: world.PushQueryDataForEnable(queryData); break;
-                                        }
-
-                                        switch (components) {
-                                            case ComponentStatus.Enabled:
-                                                pool0.PushQueryDataForDeleteDisable(queryData);
-                                                break;
-                                            case ComponentStatus.Disabled:
-                                                pool0.PushQueryDataForDeleteEnable(queryData);
-                                                break;
-                                            default:
-                                                pool0.PushQueryDataForDelete(queryData);
-                                                break;
-                                        }
-
-                                        filteredBlocks = queryData.Blocks;
-                                        firstGlobalBlockIdx = (int)globalBlockIdx;
-                                    }
-
-                                    filteredBlocks[globalBlockIdx].EntitiesMask = entitiesMask;
-                                    filteredBlocks[globalBlockIdx].NextGlobalBlock = -1;
-                                    previousGlobalBlockIdx = (int)globalBlockIdx;
-                                }
-                            } while (chunkMask != 0);
-                        }
-                    }
-                }
-
-                return filteredBlocks != null;
-            }
-
-            [SuppressMessage("ReSharper", "PossibleNullReferenceException")]
-            #if NET5_0_OR_GREATER
-            [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Type metadata is preserved by the registration path.")]
-            #endif
-            [MethodImpl(AggressiveInlining)]
-            internal bool PrepareStrict<T0>(TFilter filter, ReadOnlySpan<ushort> clusters, EntityStatusType entities, ComponentStatus components, out QueryData queryData, out int firstGlobalBlockIdx)
-                where T0 : struct, IComponent {
-                #if FFS_ECS_DEBUG
-                AssertNotNestedParallelQuery(WorldTypeName);
-                AssertRegisteredComponent<T0>(Components<T0>.ComponentsTypeName);
-                filter.Assert<TWorld>();
                 #endif
 
                 ref var world = ref Data.Instance;
@@ -3865,36 +3632,9 @@ namespace FFS.Libraries.StaticEcs {
                                         filteredBlocks[previousGlobalBlockIdx].NextGlobalBlock = (int)globalBlockIdx;
                                     }
                                     else {
-                                        queryData = world.PushCurrentQuery();
+                                        queryData = CreateQueryData<T0>(filter, mode == QueryMode.Strict, entities, components);
                                         filteredBlocks = queryData.Blocks;
                                         firstGlobalBlockIdx = (int)globalBlockIdx;
-                                        
-                                        #if FFS_ECS_DEBUG
-                                        const int queryMode = 1; // strict
-                                        AssertSameQueryMode(WorldTypeName, queryMode);
-                                        world.QueryMode = queryMode; 
-                                        
-                                        const int block = 1;
-                                        filter.Block<TWorld>(block);
-                                        world.BlockDestroy(block);
-
-                                        switch (entities) {
-                                            case EntityStatusType.Enabled: world.BlockDisable(block); break;
-                                            case EntityStatusType.Disabled: world.BlockEnable(block); break;
-                                        }
-
-                                        switch (components) {
-                                            case ComponentStatus.Enabled:
-                                                pool0.BlockDeleteDisable(block);
-                                                break;
-                                            case ComponentStatus.Disabled:
-                                                pool0.BlockDeleteEnable(block);
-                                                break;
-                                            default:
-                                                pool0.BlockDelete(block);
-                                                break;
-                                        }
-                                        #endif
                                     }
 
                                     filteredBlocks[globalBlockIdx].EntitiesMask = entitiesMask;
@@ -3920,8 +3660,6 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotNestedParallelQuery(WorldTypeName);
                 AssertNotMoreThanOneParallelQuery(WorldTypeName);
                 AssertParallelAvailable(WorldTypeName);
-                AssertRegisteredComponent<T0>(Components<T0>.ComponentsTypeName);
-                filter.Assert<TWorld>();
                 #endif
 
                 ref var world = ref Data.Instance;
@@ -4016,6 +3754,54 @@ namespace FFS.Libraries.StaticEcs {
                 return jobsCount != 0;
             }
 
+            [MethodImpl(NoInlining)]
+            private static QueryData CreateQueryData<T0>(TFilter filter, bool strict, EntityStatusType entities, ComponentStatus components)
+                where T0 : struct, IComponent {
+                const int block = 1;
+                
+                ref var world = ref Data.Instance;
+                
+                #if FFS_ECS_DEBUG
+                var queryMode = (byte)(strict ? 1 : 0);
+                AssertSameQueryMode(WorldTypeName, queryMode);
+                world.QueryMode = queryMode;
+                #endif
+
+                var queryData = world.PushCurrentQuery();
+                if (!strict) {
+                    world.PushQueryDataForDestroy(queryData);
+
+                    switch (entities) {
+                        case EntityStatusType.Enabled: world.PushQueryDataForDisable(queryData); break;
+                        case EntityStatusType.Disabled: world.PushQueryDataForEnable(queryData); break;
+                    }
+                }
+                #if FFS_ECS_DEBUG
+                else {
+                    world.BlockDestroy(block);
+
+                    switch (entities) {
+                        case EntityStatusType.Enabled: world.BlockDisable(block); break;
+                        case EntityStatusType.Disabled: world.BlockEnable(block); break;
+                    }
+                }
+                filter.Block<TWorld>(block);
+                switch (components) {
+                    case ComponentStatus.Enabled:
+                        Components<T0>.Instance.BlockDeleteDisable(block);
+                        break;
+                    case ComponentStatus.Disabled:
+                        Components<T0>.Instance.BlockDeleteEnable(block);
+                        break;
+                    default:
+                        Components<T0>.Instance.BlockDelete(block);
+                        break;
+                }
+                #endif
+                
+                return queryData;
+            }
+
             #if NET5_0_OR_GREATER
             [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Type metadata is preserved by the registration path.")]
             #endif
@@ -4025,7 +3811,6 @@ namespace FFS.Libraries.StaticEcs {
                 ref var world = ref Data.Instance;
                 ref var pool0 = ref Components<T0>.Instance;
 
-                filter.PopQueryData<TWorld>();
                 world.PopQueryDataForDestroy();
 
                 switch (entities) {
@@ -4033,18 +3818,20 @@ namespace FFS.Libraries.StaticEcs {
                     case EntityStatusType.Disabled: world.PopQueryDataForEnable(); break;
                 }
 
+                #if FFS_ECS_DEBUG
+                const int unblock = -1;
+                filter.Block<TWorld>(unblock);
                 switch (components) {
                     case ComponentStatus.Enabled:
-                        pool0.PopQueryDataForDeleteDisable();
+                        pool0.BlockDeleteDisable(unblock);
                         break;
                     case ComponentStatus.Disabled:
-                        pool0.PopQueryDataForDeleteEnable();
+                        pool0.BlockDeleteEnable(unblock);
                         break;
                     default:
-                        pool0.PopQueryDataForDelete();
+                        pool0.BlockDelete(unblock);
                         break;
                 }
-                #if FFS_ECS_DEBUG
                 if (world.QueryDataCount == 0) {
                     world.QueryMode = 0;
                 }

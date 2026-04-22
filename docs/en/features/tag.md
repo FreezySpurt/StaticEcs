@@ -38,14 +38,13 @@ W.Initialize();
 ```
 
 {: .note }
-Tags automatically get a stable GUID computed from the type name. To provide configuration (GUID override, change tracking), implement the `ITagConfig<T>` interface on the tag struct. Both manual registration and `RegisterAll()` will use it automatically:
+Tags automatically get a stable GUID computed from the type name. To override the GUID, implement the `ITagConfig<T>` interface on the tag struct. Both manual registration and `RegisterAll()` will use it automatically. Change tracking is enabled by implementing marker interfaces — see [Change Tracking](tracking):
 
 ```csharp
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
     public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."),
-        trackAdded: true,    // enable addition tracking (default — false)
-        trackDeleted: true   // enable deletion tracking (default — false)
+        guid: new Guid("A1B2C3D4-...")
     );
 }
 ```

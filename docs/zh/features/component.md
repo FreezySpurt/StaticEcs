@@ -9,7 +9,7 @@ nav_order: 3
 - 以带有 `IComponent` 标记接口的用户自定义结构体表示
 - 使用 struct 纯粹出于性能考虑（SoA 存储）
 - 支持生命周期钩子：`OnAdd`、`OnDelete`、`CopyTo`、`Write`、`Read`
-- 可以在不删除数据的情况下启用/禁用
+- 可以在不删除数据的情况下启用/禁用 — 通过 `IDisableable` 标记接口选择启用
 
 #### 示例:
 ```csharp
@@ -67,9 +67,8 @@ public struct Health : IComponent, IComponentConfig<Health> {
 - `noDataLifecycle` — 禁用框架数据管理（默认 — false）。当 `false` 时，框架会用 `defaultValue` 预初始化新存储，并在删除时将数据重置为 `defaultValue`。当 `true` 时不执行初始化或清理 — 对于高频 unmanaged 类型很有用。如果定义了 `OnDelete`，无论此标志如何，钩子都负责清理
 - `readWriteStrategy` — 二进制序列化策略（默认 — 自动检测）
 - `defaultValue` — 初始化和删除时的默认值（默认 — 无）
-- `trackAdded` — 启用添加追踪（默认 — false），参见[变更追踪](tracking)
-- `trackDeleted` — 启用删除追踪（默认 — false），参见[变更追踪](tracking)
-- `trackChanged` — 启用通过 `Mut<T>()` / `ref` 访问的变更追踪（默认 — false），参见[变更追踪](tracking)
+
+变更追踪通过在组件类型本身上实现标记接口启用（不再通过配置参数）：`ITrackableAdded`、`ITrackableDeleted`、`ITrackableChanged`。参见[变更追踪](tracking)。
 
 ___
 
@@ -130,7 +129,7 @@ velocity.Value += 10f;
 ref readonly var pos = ref entity.Read<Position>();
 var x = pos.Value.x; // 读取 OK，无 Changed 标记
 
-// 获取带追踪的可变 ref 引用 — 当 trackChanged 启用时标记为 Changed
+// 获取带追踪的可变 ref 引用 — 当组件实现 ITrackableChanged 时标记为 Changed
 ref var pos = ref entity.Mut<Position>();
 pos.Value += delta; // 数据已修改且标记为 Changed
 ```
@@ -165,7 +164,15 @@ entity.Delete<Position, Velocity, Name>();
 ___
 
 #### 启用/禁用:
+
+Disable/Enable 是按组件类型 **opt-in** 的，通过 `IDisableable` 标记接口启用。只有标记了 `IDisableable` 的组件才会分配每组件的 disabled 位掩码，并暴露实体上的 `Disable<T>()`/`Enable<T>()`/`HasDisabled<T>()`/`HasEnabled<T>()`，也只有它们能用于 `*Disabled` 查询过滤器。未标记的组件不会为禁用状态付出任何内存或序列化开销。
+
 ```csharp
+// 将组件标记为可禁用
+public struct Position : IComponent, IDisableable {
+    public Vector3 Value;
+}
+
 // 禁用组件 — 数据保留，但实体从标准查询中排除
 // 返回 ToggleResult 枚举：MissingComponent、Unchanged、Changed
 ToggleResult disabled = entity.Disable<Position>();
@@ -194,7 +201,13 @@ bool anyDisabled = entity.HasDisabledAny<Position, Velocity>();
 ```
 
 {: .notezh }
+所有 `Disable*`/`Enable*`/`Has*Disabled`/`Has*Enabled` 方法的约束为 `T : struct, IComponent, IDisableable` — 在未标记的类型上调用是**编译期错误**。`AllOnlyDisabled<T>`、`AllWithDisabled<T>`、`NoneWithDisabled<T>`、`AnyOnlyDisabled<>`、`AnyWithDisabled<>` 过滤器同样如此。
+
+{: .notezh }
 禁用的组件不会出现在标准查询过滤器（`All`、`None`、`Any`）中，但数据保留在内存中。使用 `WithDisabled`/`OnlyDisabled` 过滤器变体来处理禁用的组件。
+
+{: .notezh }
+内置类型 `Multi<TValue>`（multi-component）、`Link<TLinkType>` 和 `Links<TLinkType>`（关系）已经实现了 `IDisableable` — 关系和 multi-component 上的 Disable/Enable 无需在用户代码中做任何修改即可使用。
 
 ___
 

@@ -33,23 +33,20 @@ namespace FFS.Libraries.StaticEcs {
             /// <param name="entity">When the method returns <c>true</c>, contains the entity for which the predicate matched; otherwise, <c>default</c>.</param>
             /// <param name="function">Predicate delegate receiving the entity. Return <c>true</c> to stop and select the entity.</param>
             /// <param name="entities">Filter by entity status.</param>
-            /// <param name="queryMode"><see cref="QueryMode.Strict"/> (default) for fastest iteration; <see cref="QueryMode.Flexible"/> allows modifying filtered types on other entities.</param>
             /// <param name="clusters">Optional cluster filter. When empty, uses the world's active clusters.</param>
             /// <returns><c>true</c> if an entity was found (written to <paramref name="entity"/>); <c>false</c> if no entity matched.</returns>
             [MethodImpl(AggressiveInlining)]
             public bool Search(out Entity entity,
                                    SearchFunctionWithEntity<TWorld> function,
                                    EntityStatusType entities = EntityStatusType.Enabled,
-                                   QueryMode queryMode = QueryMode.Strict,
                                    ReadOnlySpan<ushort> clusters = default) {
                 ref var world = ref Data.Instance;
-                var strict = queryMode == QueryMode.Strict;
 
                 var result = false;
                 entity = new Entity();
                 ref var entityId = ref entity.IdWithOffset;
 
-                if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
+                if (Prepare(Filter, clusters, entities, true, out var queryData, out var firstGlobalBlockIdx)) {
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -74,66 +71,39 @@ namespace FFS.Libraries.StaticEcs {
                             #endif
                             chunkBlockEntityId += Const.ENTITY_ID_OFFSET;
 
-                            if (strict) {
-                                if (entitiesMask == ulong.MaxValue) {
-                                    var componentEnd = componentOffset + Const.U64_BITS;
-                                    entityId = chunkBlockEntityId;
-                                    while (componentOffset < componentEnd) {
-                                        #if FFS_ECS_DEBUG
-                                        world.SetCurrentQueryEntity(entityId);
-                                        #endif
-                                        if (function.Invoke(entity)) {
-                                            result = true;
-                                            goto EXIT;
-                                        }
-
-                                        componentOffset++;
-                                        entityId++;
+                            if (entitiesMask == ulong.MaxValue) {
+                                var componentEnd = componentOffset + Const.U64_BITS;
+                                entityId = chunkBlockEntityId;
+                                while (componentOffset < componentEnd) {
+                                    #if FFS_ECS_DEBUG
+                                    world.SetCurrentQueryEntity(entityId);
+                                    #endif
+                                    if (function.Invoke(entity)) {
+                                        result = true;
+                                        goto EXIT;
                                     }
-                                }
-                                else {
-                                    var runStarts = entitiesMask & ~(entitiesMask << 1);
-                                    var runEnds = entitiesMask & ~(entitiesMask >> 1);
-                                    do {
-                                        #if NET6_0_OR_GREATER
-                                        var runStart = (byte)System.Numerics.BitOperations.TrailingZeroCount(runStarts);
-                                        var runEnd = (byte)System.Numerics.BitOperations.TrailingZeroCount(runEnds);
-                                        #else
-                                        var runStart = deBruijn[(uint)(((runStarts & (ulong)-(long)runStarts) * 0x37E84A99DAE458FUL) >> 58)];
-                                        var runEnd = deBruijn[(uint)(((runEnds & (ulong)-(long)runEnds) * 0x37E84A99DAE458FUL) >> 58)];
-                                        #endif
-                                        runStarts &= runStarts - 1UL;
-                                        runEnds &= runEnds - 1UL;
-                                        var componentIdx = runStart + componentOffset;
-                                        var componentEnd = runEnd + componentOffset;
-                                        entityId = chunkBlockEntityId + runStart;
-                                        while (componentIdx <= componentEnd) {
-                                            #if FFS_ECS_DEBUG
-                                            world.SetCurrentQueryEntity(entityId);
-                                            #endif
-                                            if (function.Invoke(entity)) {
-                                                result = true;
-                                                goto EXIT;
-                                            }
 
-                                            componentIdx++;
-                                            entityId++;
-                                        }
-                                    } while (runStarts != 0);
+                                    componentOffset++;
+                                    entityId++;
                                 }
                             }
                             else {
+                                var runStarts = entitiesMask & ~(entitiesMask << 1);
+                                var runEnds = entitiesMask & ~(entitiesMask >> 1);
                                 do {
-                                    var isolatedBit = entitiesMask & (ulong)-(long)entitiesMask;
                                     #if NET6_0_OR_GREATER
-                                    var runStart = (byte)System.Numerics.BitOperations.TrailingZeroCount(entitiesMask);
+                                    var runStart = (byte)System.Numerics.BitOperations.TrailingZeroCount(runStarts);
+                                    var runEnd = (byte)System.Numerics.BitOperations.TrailingZeroCount(runEnds);
                                     #else
-                                    var runStart = deBruijn[(uint)((isolatedBit * 0x37E84A99DAE458FUL) >> 58)];
+                                    var runStart = deBruijn[(uint)(((runStarts & (ulong)-(long)runStarts) * 0x37E84A99DAE458FUL) >> 58)];
+                                    var runEnd = deBruijn[(uint)(((runEnds & (ulong)-(long)runEnds) * 0x37E84A99DAE458FUL) >> 58)];
                                     #endif
-
+                                    runStarts &= runStarts - 1UL;
+                                    runEnds &= runEnds - 1UL;
+                                    var componentIdx = runStart + componentOffset;
+                                    var componentEnd = runEnd + componentOffset;
                                     entityId = chunkBlockEntityId + runStart;
-
-                                    do {
+                                    while (componentIdx <= componentEnd) {
                                         #if FFS_ECS_DEBUG
                                         world.SetCurrentQueryEntity(entityId);
                                         #endif
@@ -142,12 +112,10 @@ namespace FFS.Libraries.StaticEcs {
                                             goto EXIT;
                                         }
 
-                                        isolatedBit <<= 1;
+                                        componentIdx++;
                                         entityId++;
-                                    } while ((entitiesMaskRef & isolatedBit) != 0);
-
-                                    entitiesMask = entitiesMaskRef & ~(isolatedBit - 1);
-                                } while (entitiesMask != 0);
+                                    }
+                                } while (runStarts != 0);
                             }
                         } while (firstGlobalBlockIdx >= 0);
 
@@ -158,7 +126,7 @@ namespace FFS.Libraries.StaticEcs {
                     finally
                     #endif
                     {
-                        Dispose(Filter, entities, strict, queryData);
+                        Dispose(Filter, entities, true, queryData);
                     }
                 }
 
@@ -190,7 +158,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <param name="userData">User data passed by ref. Modifications persist after the query completes.</param>
             /// <param name="function">Delegate receiving <c>(ref TData, Entity)</c> for each matching entity.</param>
             /// <param name="entities">Filter by entity status.</param>
-            /// <param name="queryMode"><see cref="QueryMode.Strict"/> (default) for fastest iteration; <see cref="QueryMode.Flexible"/> allows modifying filtered types on other entities.</param>
+            /// <param name="queryMode"><see cref="QueryMode.Strict"/> (default) for fastest iteration; <see cref="QueryMode.Flexible"/> additionally tolerates entity-level destroy/disable/enable on other snapshot entities. In both modes, entities outside the iteration snapshot (created mid-iteration or not matching the filter) are not blocked.</param>
             /// <param name="clusters">Optional cluster filter. When empty, uses the world's active clusters.</param>
             [MethodImpl(AggressiveInlining)]
             public void For<TData>(ref TData userData,
@@ -491,7 +459,7 @@ namespace FFS.Libraries.StaticEcs {
                                            uint minEntitiesPerThread = Const.ENTITIES_IN_SEGMENT,
                                            uint workersLimit = 0) {
                 if (PrepareParallel(Filter, clusters, entities, out var count, out var jobs, out var jobIndexes)) {
-                    Resources<ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value = new(function, userData);
+                    Resources<TWorld, ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value = new(function, userData);
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -516,8 +484,8 @@ namespace FFS.Libraries.StaticEcs {
                             world.QueryMode = 0;
                         }
                         #endif
-                        userData = Resources<ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value.Value2;
-                        Resources<ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value = default;
+                        userData = Resources<TWorld, ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value.Value2;
+                        Resources<TWorld, ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value = default;
                     }
                 }
             }
@@ -529,8 +497,8 @@ namespace FFS.Libraries.StaticEcs {
                 var deBruijn = Utils.DeBruijn;
                 #endif
 
-                var function = Resources<ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value.Value1;
-                ref var data = ref Resources<ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value.Value2;
+                var function = Resources<TWorld, ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value.Value1;
+                ref var data = ref Resources<TWorld, ParallelData<QueryFunctionWithRefDataEntity<TData, TWorld>, TData>>.Value.Value2;
                 var entity = new Entity();
                 ref var entityId = ref entity.IdWithOffset;
 
@@ -607,7 +575,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <param name="function">Delegate receiving <c>(Entity)</c> for each matching entity.</param>
             /// <param name="entities">Filter by entity status.</param>
             /// <param name="components">Filter by component status.</param>
-            /// <param name="queryMode"><see cref="QueryMode.Strict"/> (default) for fastest iteration; <see cref="QueryMode.Flexible"/> allows modifying filtered types on other entities.</param>
+            /// <param name="queryMode"><see cref="QueryMode.Strict"/> (default) for fastest iteration; <see cref="QueryMode.Flexible"/> additionally tolerates entity-level destroy/disable/enable on other snapshot entities. In both modes, entities outside the iteration snapshot (created mid-iteration or not matching the filter) are not blocked.</param>
             /// <param name="clusters">Optional cluster filter. When empty, uses the world's active clusters.</param>
             [MethodImpl(AggressiveInlining)]
             public void For(QueryFunctionWithEntity<TWorld> function,
@@ -875,7 +843,7 @@ namespace FFS.Libraries.StaticEcs {
                                     uint minEntitiesPerThread = Const.ENTITIES_IN_SEGMENT,
                                     uint workersLimit = 0) {
                 if (PrepareParallel(Filter, clusters, entities, out var count, out var jobs, out var jobIndexes)) {
-                    Resources<ParallelData<QueryFunctionWithEntity<TWorld>>>.Value = new(function);
+                    Resources<TWorld, ParallelData<QueryFunctionWithEntity<TWorld>>>.Value = new(function);
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -900,7 +868,7 @@ namespace FFS.Libraries.StaticEcs {
                             world.QueryMode = 0;
                         }
                         #endif
-                        Resources<ParallelData<QueryFunctionWithEntity<TWorld>>>.Value = default;
+                        Resources<TWorld, ParallelData<QueryFunctionWithEntity<TWorld>>>.Value = default;
                     }
                 }
             }
@@ -912,7 +880,7 @@ namespace FFS.Libraries.StaticEcs {
                 var deBruijn = Utils.DeBruijn;
                 #endif
 
-                var function = Resources<ParallelData<QueryFunctionWithEntity<TWorld>>>.Value.Value;
+                var function = Resources<TWorld, ParallelData<QueryFunctionWithEntity<TWorld>>>.Value.Value;
                 var entity = new Entity();
                 ref var entityId = ref entity.IdWithOffset;
 
@@ -986,7 +954,7 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             /// <param name="function">Unmanaged function pointer receiving <c>(Entity)</c> for each matching entity.</param>
             /// <param name="entities">Filter by entity status.</param>
-            /// <param name="queryMode"><see cref="QueryMode.Strict"/> (default) for fastest iteration; <see cref="QueryMode.Flexible"/> allows modifying filtered types on other entities.</param>
+            /// <param name="queryMode"><see cref="QueryMode.Strict"/> (default) for fastest iteration; <see cref="QueryMode.Flexible"/> additionally tolerates entity-level destroy/disable/enable on other snapshot entities. In both modes, entities outside the iteration snapshot (created mid-iteration or not matching the filter) are not blocked.</param>
             /// <param name="clusters">Optional cluster filter. When empty, uses the world's active clusters.</param>
             [MethodImpl(AggressiveInlining)]
             public unsafe void For(delegate*<Entity, void> function,
@@ -1240,7 +1208,7 @@ namespace FFS.Libraries.StaticEcs {
                                                     uint workersLimit = 0)
                 where TFunction : struct, IQueryBlock {
                 if (PrepareParallel(Filter, clusters, entities, out var count, out var jobs, out var jobIndexes)) {
-                    Resources<ParallelData<TFunction>>.Value = new(function);
+                    Resources<TWorld, ParallelData<TFunction>>.Value = new(function);
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -1265,8 +1233,8 @@ namespace FFS.Libraries.StaticEcs {
                             world.QueryMode = 0;
                         }
                         #endif
-                        function = Resources<ParallelData<TFunction>>.Value.Value;
-                        Resources<ParallelData<TFunction>>.Value = default;
+                        function = Resources<TWorld, ParallelData<TFunction>>.Value.Value;
+                        Resources<TWorld, ParallelData<TFunction>>.Value = default;
                     }
                 }
             }
@@ -1279,7 +1247,7 @@ namespace FFS.Libraries.StaticEcs {
                 var deBruijn = Utils.DeBruijn;
                 #endif
 
-                ref var function = ref Resources<ParallelData<TFunction>>.Value.Value;
+                ref var function = ref Resources<TWorld, ParallelData<TFunction>>.Value.Value;
                 EntityBlock entityBlock = default;
                 ref var entityBlockOffset = ref entityBlock.Offset;
 
@@ -1436,7 +1404,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <typeparam name="TFunction">Struct implementing <see cref="IQuery"/>.</typeparam>
             /// <param name="function">The function struct, passed by ref to preserve state across invocations.</param>
             /// <param name="entities">Filter by entity status.</param>
-            /// <param name="queryMode"><see cref="QueryMode.Strict"/> (default) for fastest iteration; <see cref="QueryMode.Flexible"/> allows modifying filtered types on other entities.</param>
+            /// <param name="queryMode"><see cref="QueryMode.Strict"/> (default) for fastest iteration; <see cref="QueryMode.Flexible"/> additionally tolerates entity-level destroy/disable/enable on other snapshot entities. In both modes, entities outside the iteration snapshot (created mid-iteration or not matching the filter) are not blocked.</param>
             /// <param name="clusters">Optional cluster filter. When empty, uses the world's active clusters.</param>
             [MethodImpl(AggressiveInlining)]
             public void For<TFunction>(ref TFunction function,
@@ -1595,7 +1563,7 @@ namespace FFS.Libraries.StaticEcs {
                                                uint workersLimit = 0)
                 where TFunction : struct, IQuery {
                 if (PrepareParallel(Filter, clusters, entities, out var count, out var jobs, out var jobIndexes)) {
-                    Resources<ParallelData<TFunction>>.Value = new(function);
+                    Resources<TWorld, ParallelData<TFunction>>.Value = new(function);
                     #if FFS_ECS_DEBUG
                     try
                     #endif
@@ -1620,8 +1588,8 @@ namespace FFS.Libraries.StaticEcs {
                             world.QueryMode = 0;
                         }
                         #endif
-                        function = Resources<ParallelData<TFunction>>.Value.Value;
-                        Resources<ParallelData<TFunction>>.Value = default;
+                        function = Resources<TWorld, ParallelData<TFunction>>.Value.Value;
+                        Resources<TWorld, ParallelData<TFunction>>.Value = default;
                     }
                 }
             }
@@ -1634,7 +1602,7 @@ namespace FFS.Libraries.StaticEcs {
                 var deBruijn = Utils.DeBruijn;
                 #endif
 
-                ref var function = ref Resources<ParallelData<TFunction>>.Value.Value;
+                ref var function = ref Resources<TWorld, ParallelData<TFunction>>.Value.Value;
                 var entity = new Entity();
                 ref var entityId = ref entity.IdWithOffset;
 
@@ -1707,7 +1675,6 @@ namespace FFS.Libraries.StaticEcs {
                                   bool strict, out QueryData queryData, out int firstGlobalBlockIdx, bool withDisabledClusters = false) {
                 #if FFS_ECS_DEBUG
                 AssertNotNestedParallelQuery(WorldTypeName);
-                filter.Assert<TWorld>();
                 #endif
 
 
@@ -1773,6 +1740,7 @@ namespace FFS.Libraries.StaticEcs {
                                     }
                                     else {
                                         #if FFS_ECS_DEBUG
+                                        const int block = 1;
                                         var queryMode = strict ? (byte)1 : (byte)2;
                                         AssertSameQueryMode(WorldTypeName, queryMode);
                                         world.QueryMode = queryMode;
@@ -1781,7 +1749,6 @@ namespace FFS.Libraries.StaticEcs {
                                         queryData = world.PushCurrentQuery();
 
                                         if (!strict) {
-                                            filter.PushQueryData<TWorld>(queryData);
                                             world.PushQueryDataForDestroy(queryData);
 
                                             switch (entities) {
@@ -1791,8 +1758,6 @@ namespace FFS.Libraries.StaticEcs {
                                         }
                                         #if FFS_ECS_DEBUG
                                         else {
-                                            const int block = 1;
-                                            filter.Block<TWorld>(block);
                                             world.BlockDestroy(block);
 
                                             switch (entities) {
@@ -1800,6 +1765,7 @@ namespace FFS.Libraries.StaticEcs {
                                                 case EntityStatusType.Disabled: world.BlockEnable(block); break;
                                             }
                                         }
+                                        filter.Block<TWorld>(block);
                                         #endif
 
                                         filteredBlocks = queryData.Blocks;
@@ -1823,7 +1789,6 @@ namespace FFS.Libraries.StaticEcs {
                                   bool strict, out QueryData queryData, out int firstGlobalBlockIdx) {
                 #if FFS_ECS_DEBUG
                 AssertNotNestedParallelQuery(WorldTypeName);
-                filter.Assert<TWorld>();
                 #endif
 
 
@@ -1881,6 +1846,7 @@ namespace FFS.Libraries.StaticEcs {
                                 }
                                 else {
                                     #if FFS_ECS_DEBUG
+                                    const int block = 1;
                                     var queryMode = strict ? (byte)1 : (byte)2;
                                     AssertSameQueryMode(WorldTypeName, queryMode);
                                     world.QueryMode = queryMode;
@@ -1889,7 +1855,6 @@ namespace FFS.Libraries.StaticEcs {
                                     queryData = world.PushCurrentQuery();
 
                                     if (!strict) {
-                                        filter.PushQueryData<TWorld>(queryData);
                                         world.PushQueryDataForDestroy(queryData);
 
                                         switch (entities) {
@@ -1899,8 +1864,6 @@ namespace FFS.Libraries.StaticEcs {
                                     }
                                     #if FFS_ECS_DEBUG
                                     else {
-                                        const int block = 1;
-                                        filter.Block<TWorld>(block);
                                         world.BlockDestroy(block);
 
                                         switch (entities) {
@@ -1908,6 +1871,7 @@ namespace FFS.Libraries.StaticEcs {
                                             case EntityStatusType.Disabled: world.BlockEnable(block); break;
                                         }
                                     }
+                                    filter.Block<TWorld>(block);
                                     #endif
 
                                     filteredBlocks = queryData.Blocks;
@@ -1934,7 +1898,6 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotNestedParallelQuery(WorldTypeName);
                 AssertNotMoreThanOneParallelQuery(WorldTypeName);
                 AssertParallelAvailable(WorldTypeName);
-                filter.Assert<TWorld>();
                 #endif
 
                 ref var world = ref Data.Instance;
@@ -2025,9 +1988,9 @@ namespace FFS.Libraries.StaticEcs {
                 ref var world = ref Data.Instance;
 
                 world.PopCurrentQuery(queryData);
+                const int unblock = -1;
 
                 if (!strict) {
-                    filter.PopQueryData<TWorld>();
                     world.PopQueryDataForDestroy();
 
                     switch (entities) {
@@ -2037,8 +2000,6 @@ namespace FFS.Libraries.StaticEcs {
                 }
                 #if FFS_ECS_DEBUG
                 else {
-                    const int unblock = -1;
-                    filter.Block<TWorld>(unblock);
                     world.BlockDestroy(unblock);
 
                     switch (entities) {
@@ -2047,6 +2008,7 @@ namespace FFS.Libraries.StaticEcs {
                     }
                 }
 
+                filter.Block<TWorld>(unblock);
                 if (world.QueryDataCount == 0) {
                     world.QueryMode = 0;
                 }
@@ -2058,10 +2020,6 @@ namespace FFS.Libraries.StaticEcs {
             [SuppressMessage("ReSharper", "PossibleNullReferenceException")]
             [MethodImpl(AggressiveInlining)]
             internal bool FindFirst(TFilter filter, ReadOnlySpan<ushort> clusters, EntityStatusType entities, out Entity entity, bool assertSingle) {
-                #if FFS_ECS_DEBUG
-                filter.Assert<TWorld>();
-                #endif
-
                 ref var world = ref Data.Instance;
                 clusters = world.GetActiveClustersIfEmpty(clusters);
                 entity = default;

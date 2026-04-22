@@ -38,14 +38,13 @@ W.Initialize();
 ```
 
 {: .noteru }
-Теги автоматически получают стабильный GUID, вычисленный из имени типа. Для предоставления конфигурации (переопределение GUID, отслеживание изменений) реализуйте интерфейс `ITagConfig<T>` на структуре тега. И ручная регистрация, и `RegisterAll()` используют его автоматически:
+Теги автоматически получают стабильный GUID, вычисленный из имени типа. Для переопределения GUID реализуйте интерфейс `ITagConfig<T>` на структуре тега. И ручная регистрация, и `RegisterAll()` используют его автоматически. Отслеживание изменений включается реализацией интерфейсов-маркеров — см. [Отслеживание изменений](tracking):
 
 ```csharp
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
     public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."),
-        trackAdded: true,    // включить отслеживание добавления (по умолчанию — false)
-        trackDeleted: true   // включить отслеживание удаления (по умолчанию — false)
+        guid: new Guid("A1B2C3D4-...")
     );
 }
 ```

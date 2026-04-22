@@ -219,15 +219,16 @@ ___
 // Стандартная инициализация (baseEntitiesCapacity — начальная ёмкость для сущностей)
 W.Initialize(baseEntitiesCapacity: 4096);
 
-// Инициализация с восстановлением сохранённых идентификаторов (версии EntityGID)
-W.InitializeFromGIDStoreSnapshot(snapshot);
+// После инициализации можно загрузить ранее сохранённый снимок:
+// — только идентификаторы сущностей (версии EntityGID)
+W.Serializer.RestoreFromGIDStoreSnapshot(snapshot);
 
-// Инициализация с полным восстановлением мира из снимка
-W.InitializeFromWorldSnapshot(snapshot);
+// — или полное состояние мира (сущности и все их данные)
+W.Serializer.LoadWorldSnapshot(snapshot);
 ```
 
 {: .noteru }
-`InitializeFromGIDStoreSnapshot` восстанавливает только метаданные идентификаторов сущностей (версии GID). `InitializeFromWorldSnapshot` восстанавливает полное состояние мира, включая все сущности и их данные.
+`RestoreFromGIDStoreSnapshot` восстанавливает только метаданные идентификаторов сущностей (версии GID). `LoadWorldSnapshot` восстанавливает полное состояние мира, включая все сущности и их данные. Оба метода требуют, чтобы мир уже был инициализирован.
 
 ___
 

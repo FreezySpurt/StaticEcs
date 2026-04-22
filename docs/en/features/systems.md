@@ -48,6 +48,12 @@ public interface ISystem {
 
     // Called once during Systems.Destroy()
     void Destroy() { }
+
+    // Snapshot serialization hooks — override Guid() to opt this system into snapshots
+    Guid? Guid()                                              => null;
+    byte  Version()                                            => 0;
+    void  Write(ref BinaryPackWriter writer)                   {}
+    void  Read(ref BinaryPackReader reader, byte version)      {}
 }
 ```
 
@@ -101,8 +107,10 @@ Create() → Add() → Initialize() → Update() loop → Destroy()
 ```
 
 ```csharp
-// 1. Create system group (baseSize — initial array capacity)
+// 1. Create system group (baseSize — initial array capacity, snapshotGuid — pipeline identity in snapshots)
 GameSys.Create(baseSize: 64);
+// or with explicit pipeline Guid for snapshot stability across renames:
+// GameSys.Create(baseSize: 64, snapshotGuid: new("…stable-pipeline-guid…"));
 
 // 2. Register systems (order determines execution order)
 GameSys.Add(new InputSystem(), order: -10)
@@ -267,3 +275,46 @@ while (gameIsRunning) {
 GameSys.Destroy();
 W.Destroy();
 ```
+
+___
+
+## Snapshot serialization
+
+`ISystem` carries four optional default-implemented methods (`Guid?`, `Version`, `Write`, `Read`) — same shape as `IResource`. Override `Guid()` to opt a system instance into snapshot serialization:
+
+```csharp
+public class SpawnerSystem : ISystem {
+    private int _nextId;
+
+    public Guid? Guid() => new("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    public byte  Version() => 1;
+
+    public void Update() { /* ... */ }
+
+    public void Write(ref BinaryPackWriter writer)              => writer.WriteInt(_nextId);
+    public void Read(ref BinaryPackReader reader, byte version) => _nextId = reader.ReadInt();
+}
+```
+
+Validation runs at `Add<TSystem>`:
+
+- Systems without `Guid` are silently excluded from snapshots.
+- Any system declaring `Guid` must override **both** `Write` and `Read` regardless of layout (system instances are stored boxed inside `SystemData`, so the unmanaged fast-path does not apply). Missing them throws `StaticEcsException`.
+- Duplicate `Guid` within the same `Systems<TSystemsType>` group is asserted in DEBUG.
+
+Each `Systems<TSystemsType>.Create` registers its pipeline in the world's snapshot registry; the pipeline `Guid` defaults to `typeof(TSystemsType).GuidFromAQN()` and can be overridden via the optional `snapshotGuid` parameter. `WorldSnapshot` automatically writes one section per pipeline (its scoped resources + every system with a `Guid`); on load, sections whose pipeline `Guid` is not currently registered are silently skipped.
+
+Standalone API mirrors `Create/LoadEventsSnapshot`:
+
+```csharp
+// Save
+byte[] snapshot = W.Serializer.CreateSystemsSnapshot();
+W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
+
+// Load
+W.Serializer.LoadSystemsSnapshot(snapshot);
+W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+```
+
+Full format and migration details: see [Serialization → Systems serialization](./serialization.md).
+

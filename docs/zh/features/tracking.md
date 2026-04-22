@@ -8,12 +8,12 @@ nav_order: 13
 
 StaticEcs 提供四种变更追踪类型，全部零分配且按需启用：
 
-| 类型 | 追踪目标 | 适用范围 | 配置位置 |
+| 类型 | 追踪目标 | 适用范围 | 如何启用 |
 |------|---------|---------|---------|
-| **Added** | 组件/标签被添加 | 组件、标签 | `ComponentTypeConfig` / `TagTypeConfig` |
-| **Deleted** | 组件/标签被删除 | 组件、标签 | `ComponentTypeConfig` / `TagTypeConfig` |
-| **Changed** | 组件数据通过 `ref` 被访问 | 仅组件 | `ComponentTypeConfig` |
-| **Created** | 新实体被创建 | 全局（实体） | `WorldConfig.TrackCreated` |
+| **Added** | 组件/标签被添加 | 组件、标签 | 在类型上实现 `ITrackableAdded` |
+| **Deleted** | 组件/标签被删除 | 组件、标签 | 在类型上实现 `ITrackableDeleted` |
+| **Changed** | 组件数据通过 `ref` 被访问 | 仅组件 | 在组件上实现 `ITrackableChanged` |
+| **Created** | 新实体被创建 | 全局（实体） | `WorldConfig.TrackCreated = true` |
 
 - 位图存储：每 64 个实体一个 `ulong`，每个被追踪的类型独立
 - 追踪通过环形缓冲区（默认 8 个 Tick）按世界 Tick 进行版本管理。每个系统自动查看自上次执行以来的变更 — 无需手动清除
@@ -24,46 +24,47 @@ ___
 
 ## 配置
 
-所有追踪默认关闭，必须在类型注册时显式启用。
+所有追踪默认关闭，通过在组件/标签类型上实现相应的标记接口启用。
+
+追踪由三个标记接口控制，既适用于组件也适用于标签（有一个例外见下）：
+
+| 接口 | 启用的功能 |
+|------|-----------|
+| `ITrackableAdded` | 添加追踪（`AllAdded`、`NoneAdded`、`AnyAdded`、`Entity.HasAdded<T>()`） |
+| `ITrackableDeleted` | 删除追踪（`AllDeleted`、`NoneDeleted`、`AnyDeleted`、`Entity.HasDeleted<T>()`） |
+| `ITrackableChanged` | 值变更追踪（`AllChanged`、`NoneChanged`、`AnyChanged`、`Entity.HasChanged<T>()`）。仅适用于组件 — 在标签上忽略。 |
+
+查询过滤器和 `Entity.HasXxx<T>()` 方法的类型参数通过 `where` 约束到对应的标记接口 — 缺失标记是编译时错误，而不是运行时断言。
+
+{: .notezh }
+相关的 opt-in 标记 `IDisableable` 用同样的编译期约束模式控制 Disable/Enable 支持和 `*Disabled` 过滤器。详见 [Component](component.md#enabledisable)。它不属于追踪，但遵循相同的「无标记 → 无分配、无 API」原则。
 
 ### 组件
 
-`ComponentTypeConfig<T>` 支持三个追踪标志：`trackAdded`、`trackDeleted`、`trackChanged`：
-
 ```csharp
-// 通过在组件类型上实现 IComponentConfig<T> 来配置追踪：
-public struct Health : IComponent, IComponentConfig<Health> {
+// 追踪全部三种变更
+public struct Health : IComponent, ITrackableAdded, ITrackableDeleted, ITrackableChanged {
     public float Value;
-    public ComponentTypeConfig<Health> Config() => new(
-        trackAdded: true,
-        trackDeleted: true,
-        trackChanged: true
-    );
 }
 
-// 仅启用一个方向
-public struct Velocity : IComponent, IComponentConfig<Velocity> {
+// 仅追踪添加
+public struct Velocity : IComponent, ITrackableAdded {
     public float X, Y;
-    public ComponentTypeConfig<Velocity> Config() => new(
-        trackAdded: true  // 仅追踪添加
-    );
 }
 
-// 带追踪的完整配置
-public struct Position : IComponent, IComponentConfig<Position> {
+// 当需要自定义配置时与 IComponentConfig<T> 组合
+public struct Position : IComponent, IComponentConfig<Position>,
+                         ITrackableAdded, ITrackableDeleted, ITrackableChanged {
     public float X, Y;
     public ComponentTypeConfig<Position> Config() => new(
         guid: new Guid("..."),
-        defaultValue: default,
-        trackAdded: true,
-        trackDeleted: true,
-        trackChanged: true
+        defaultValue: default
     );
 }
 
 W.Create(WorldConfig.Default());
 //...
-// 注册无需参数 — 配置从接口读取
+// 注册无需参数 — 标记接口通过 `default(T) is IMarker` 自动识别
 W.Types().Component<Health>()
          .Component<Velocity>()
          .Component<Position>();
@@ -73,24 +74,15 @@ W.Initialize();
 
 ### 标签
 
-`TagTypeConfig<T>` 支持 `trackAdded` 和 `trackDeleted`。标签**不**支持 Changed 追踪。
+标签支持 `ITrackableAdded` 和 `ITrackableDeleted`。标签**不**支持 Changed 追踪 — 在标签上的 `ITrackableChanged` 会被静默忽略。
 
 ```csharp
-// 通过在标签类型上实现 ITagConfig<T> 来配置追踪：
-public struct Unit : ITag, ITagConfig<Unit> {
-    public TagTypeConfig<Unit> Config() => new(
-        trackAdded: true,
-        trackDeleted: true
-    );
-}
+public struct Unit : ITag, ITrackableAdded, ITrackableDeleted { }
 
-// 带序列化 GUID
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
-    public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."),
-        trackAdded: true,
-        trackDeleted: true
-    );
+// 带序列化 GUID，通过 ITagConfig<T>
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
+    public TagTypeConfig<Poisoned> Config() => new(guid: new Guid("A1B2C3D4-..."));
 }
 
 // 注册无需参数
@@ -116,7 +108,7 @@ W.Initialize();
 
 ### 自动注册
 
-通过 `IComponentConfig<T>` / `ITagConfig<T>` 声明的 `trackAdded`、`trackDeleted` 和 `trackChanged` 会被 `RegisterAll()` 自动获取 — 无需额外配置。
+标记接口 `ITrackableAdded` / `ITrackableDeleted` / `ITrackableChanged` 会被 `RegisterAll()` 自动识别 — 无需额外配置。注册时对每个注册的组件/标签类型执行 `default(T) is ITrackableXxx` 检查。
 
 ### 编译时禁用
 
@@ -540,12 +532,16 @@ entity.Destroy();
 
 ### 反序列化
 
+- **世界快照**（`LoadWorldSnapshot`）：整个追踪状态——包括 `CurrentTick`、`CurrentLastTick`、每个带有追踪标记的组件/标签的所有环形缓冲区槽位，以及世界级的 `TrackCreated` 历史——都会完整恢复。不需要调用 `ClearTracking()`；加载后，`AllAdded<T>`、`AllChanged<T>`、`AllDeleted<T>`、`Created` 以及实体的 `HasXxx(fromTick)` 方法返回的结果与保存前一致。目标世界的 `TrackingBufferSize` 和 `TrackCreated` 必须与保存的世界相同——不匹配会抛出 `StaticEcsException`。
+- **集群/块快照**（`LoadClusterSnapshot` / `LoadChunkSnapshot`）：这些部分快照中**不**保存追踪数据。加载它们不会影响目标世界的 tick 和追踪历史。应用的实体/组件变更**不**会在目标世界产生 `Added` / `Changed` / `Deleted` 位——它们是直接的掩码写入。如果需要让新加载的块从此参与追踪，请调用 `ClearTracking()`（或按组件/按实体的变体）建立一个干净的基线，然后照常继续。
+
 ```csharp
-// ReadChunk 直接写入掩码 — 追踪不会被触发
-// ReadEntity 通过 Add 执行 — 组件被标记为 Added
-// 建议在加载后调用 ClearTracking()：
-W.Serializer.ReadChunk(ref reader);
-W.ClearTracking(); // 重置所有追踪，清除所有环形缓冲区槽位
+// 世界快照 — 追踪完全恢复，无需额外操作：
+W.Serializer.LoadWorldSnapshot(worldSnapshot);
+
+// 集群/块快照 — 如果现有追踪状态与新加载的块冲突，可选的核重置：
+W.Serializer.LoadClusterSnapshot(clusterSnapshot);
+W.ClearTracking(); // 可选；清除所有环形缓冲区槽位
 ```
 
 ___
@@ -553,7 +549,7 @@ ___
 ## 清除追踪
 
 {: .importantzh }
-通常**不需要**手动清除 — 追踪由 `W.Tick()` 和 `W.Systems<T>.Update()` 自动管理。`ClearTracking()` 方法作为"核选项"存在，会清除所有环形缓冲区槽位。主要用于反序列化后或需要完全重置追踪状态的场景。
+通常**不需要**手动清除 — 追踪由 `W.Tick()` 和 `W.Systems<T>.Update()` 自动管理。`ClearTracking()` 方法作为"核选项"存在，会清除所有环形缓冲区槽位。
 
 ```csharp
 // === 全部清除 ===
@@ -610,6 +606,10 @@ bool bothTagsAdded = entity.HasAdded<Unit, Player>();          // Unit 和 Playe
 // 标签 — ANY 语义
 bool anyTagAdded = entity.HasAnyAdded<Unit, Player>();         // Unit 或 Player 已添加
 bool anyTagDeleted = entity.HasAnyDeleted<Unit, Player>();     // Unit 或 Player 已删除
+
+// 实体创建（需要 WorldConfig.TrackCreated = true）
+bool wasCreated = entity.HasCreated();
+bool createdSinceTick5 = entity.HasCreated(fromTick: 5);
 
 // 组合使用
 if (entity.HasAdded<Position>() && entity.Has<Position>()) {

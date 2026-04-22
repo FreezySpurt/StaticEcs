@@ -8,7 +8,7 @@ nav_order: 12
 Queries are a mechanism for searching entities and their components in the world
 - All queries require no caching, are stack-allocated, and can be used on-the-fly
 - Support filtering by components, tags, entity status, and clusters
-- Two iteration modes: `Strict` (default, faster) and `Flexible` (allows modifying filtered types on other entities)
+- Two iteration modes: `Strict` (default, faster) and `Flexible` (additionally allows destroying / disabling / enabling other snapshot entities during iteration). In both modes, entities outside the iteration snapshot — created mid-iteration or not matching the filter — are not blocked.
 
 ___
 
@@ -54,6 +54,12 @@ AnyOnlyDisabled<Position, Velocity> anyDis = default;
 
 // AnyWithDisabled — at least one (any state)
 AnyWithDisabled<Position, Velocity> anyAll = default;
+
+// Note: All five *Disabled families above (AllOnlyDisabled, AllWithDisabled,
+// NoneWithDisabled, AnyOnlyDisabled, AnyWithDisabled) constrain their type
+// parameters to `struct, IComponent, IDisableable`. Components without the
+// IDisableable marker cannot be used here — compile-time error.
+// See features/component.md#enabledisable.
 
 // Results for the entities above:
 // All<Position, Velocity>              → 1, 3
@@ -108,7 +114,7 @@ AnyDeleted<Position, Velocity> anyDeleted = default;
 NoneDeleted<Position> noneDeleted = default;
 
 // AllChanged — ALL specified components were accessed via ref since last ClearChangedTracking (from 1 to 5 types)
-// Requires ComponentTypeConfig.TrackChanged = true
+// Requires the component type to implement ITrackableChanged
 AllChanged<Position> changed = default;
 
 // AnyChanged — AT LEAST ONE was changed (from 2 to 5 types)
@@ -248,9 +254,11 @@ foreach (var entity in W.Query(filter).Entities()) {
     entity.Ref<Position>().Value += entity.Read<Velocity>().Value;
 }
 
-// Flexible mode — allows modifying filtered types on other entities
+// Flexible mode — allows destroying / disabling / enabling other snapshot entities during iteration
 foreach (var entity in W.Query<All<Position>>().EntitiesFlexible()) {
-    // ...
+    // safe here: another.Destroy(), another.Disable(), another.Enable() — for snapshot entities too
+    // still forbidden (asserts in DEBUG): another.Delete<Position>(), another.Disable<Position>(), etc. on snapshot entities
+    // note: creating new entities and configuring them inside the loop is always allowed (any mode)
 }
 
 // Find the first matching entity
@@ -262,6 +270,21 @@ if (W.Query<All<Position>>().Any(out var found)) {
 if (W.Query<All<Position>>().One(out var single)) {
     // single — the only entity with Position
 }
+
+// Test whether a given entity belongs to the query result
+//   - checks the entity's lifecycle state (default: only Enabled)
+//   - checks cluster membership (if clusters are provided)
+//   - applies the query filter via Entity.IsMatch
+if (W.Query<All<Position, Velocity>>().Contains(entity)) {
+    // entity is enabled and passes the filter
+}
+
+// With optional parameters
+W.Query<All<Position>>().Contains(
+    entity,
+    entities: EntityStatusType.Any,                 // Enabled (default), Disabled, Any
+    clusters: stackalloc ushort[] { 1, 2 }          // empty = any cluster
+);
 
 // Count matching entities (full scan)
 int count = W.Query<All<Position>>().EntitiesCount();
@@ -675,21 +698,37 @@ ___
 
 For `For`, `Search`, `Entities` methods:
 
-- **`QueryMode.Strict`** (default) — forbids modifying filtered component/tag types on **other** entities during iteration. Faster.
-- **`QueryMode.Flexible`** — allows modifying filtered types on other entities, correctly controls current iteration.
+- **`QueryMode.Strict`** (default) — the DEBUG assert is precise: on **non-current entities that belong to the iteration snapshot**, only operations on filter-types `T` that could remove the cached match are blocked, plus entity-level `Destroy` / `Disable` (when iterating `Enabled`) / `Enable` (when iterating `Disabled`):
+
+  | Filter               | Blocked on a non-current snapshot entity |
+  |----------------------|------------------------------------------|
+  | `All<T>`             | `Delete<T>`, `Disable<T>`                |
+  | `AllOnlyDisabled<T>` | `Delete<T>`, `Enable<T>`                 |
+  | `AllWithDisabled<T>` | `Delete<T>`                              |
+  | `None<T>`            | `Add<T>`, `Set<T>`, `Enable<T>`          |
+
+  Operations on **types not in the filter**, on entities **outside the snapshot** (created mid-iteration or not matching the filter), and on the **current entity** are not blocked. Strict is the fastest mode (uses fast-path for fully-populated blocks).
+
+- **`QueryMode.Flexible`** — same blockers on filter-types as Strict, but additionally **allows** entity-level `Destroy` / `Disable` / `Enable` on other snapshot entities; such entities are correctly excluded from the remaining iteration via cached bitmask updates. Slower — re-reads the cached mask per entity.
 
 ```csharp
 var anotherEntity = W.NewEntity<Default>();
 anotherEntity.Add<Position>();
 
-// Strict: modifying Position on another entity — error in DEBUG
+// Strict: destroying another snapshot entity during iteration — error in DEBUG
 foreach (var entity in W.Query<All<Position>>().Entities()) {
-    anotherEntity.Delete<Position>(); // ERROR in DEBUG
+    anotherEntity.Destroy(); // ERROR in DEBUG (anotherEntity is in the snapshot)
+
+    // OK — entities created mid-iteration are NOT in the snapshot
+    var fresh = W.NewEntity<Default>();
+    fresh.Add<Position>();
+    fresh.Set(new Velocity { ... });
 }
 
-// Flexible: modification allowed, iteration is stable
+// Flexible: destroy/disable/enable of another snapshot entity is allowed
 foreach (var entity in W.Query<All<Position>>().EntitiesFlexible()) {
-    anotherEntity.Delete<Position>(); // OK — anotherEntity correctly excluded
+    anotherEntity.Destroy();            // OK — excluded from the rest of the iteration
+    // anotherEntity.Delete<Position>(); // still ERROR in DEBUG — filtered-type mutation on another snapshot entity
 }
 
 // For For/Search via parameter
@@ -699,4 +738,4 @@ W.Query().For(static (ref Position pos) => {
 ```
 
 {: .note }
-`Flexible` is useful for hierarchies or caches when modifying entities from components of other entities. In other cases, prefer `Strict` for performance.
+`Flexible` is useful when iteration logic destroys or toggles (`Disable`/`Enable`) other snapshot entities — for example, pruning child entities during a parent traversal or bulk-deactivating entities affected by an AoE effect. It does **not** lift the filter-type blockers — such mutations must be deferred (e.g. collected into a buffer and applied after the `foreach`). In other cases, prefer `Strict` for performance. Note that creating new entities inside the loop and configuring them is always allowed in both modes — newly created entities are not part of the iteration snapshot.

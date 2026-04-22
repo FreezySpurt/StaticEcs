@@ -4,6 +4,67 @@ parent: RU
 nav_order: 5
 ---
 
+# Миграция с 2.1.x на 2.2.0
+
+## Disable/Enable теперь opt-in через `IDisableable`
+
+В 2.2.x любой `IComponent` безусловно аллоцировал per-component disabled-битмаску (4 ulong на сегмент памяти) и открывал `entity.Disable<T>()`/`Enable<T>()`/`HasDisabled<T>()`/`HasEnabled<T>()` плюс `*Disabled` фильтры запросов для любого типа компонента. В 2.3.0 это становится opt-in через новый маркер-интерфейс `IDisableable`.
+
+**Breaking change**: любой компонент, на котором вызывался `Disable<T>()`/`Enable<T>()`, использовался в `*Disabled` фильтрах или в `HasDisabled<T>()`/`HasEnabled<T>()`, теперь должен декларировать `IDisableable`. Без маркера эти места не компилируются.
+
+```csharp
+// Было
+public struct Health : IComponent { public float Value; }
+
+// Стало (только если на этом типе реально используется Disable/Enable или *Disabled фильтры)
+public struct Health : IComponent, IDisableable { public float Value; }
+```
+
+Методы `Disable*`/`Enable*`/`Has*Disabled`/`Has*Enabled` на сущности, инстанс-методы `Components<T>.Disable/Enable/HasDisabled/HasEnabled` и фильтры `AllOnlyDisabled`/`AllWithDisabled`/`NoneWithDisabled`/`AnyOnlyDisabled`/`AnyWithDisabled` имеют констрейнт `T : struct, IComponent, IDisableable`.
+
+Встроенные компонент-типы — `Multi<TValue>`, `Link<TLinkType>`, `Links<TLinkType>` — уже реализуют `IDisableable`, поэтому код, переключающий отношения или multi-компоненты, продолжает работать без изменений.
+
+### Влияние на память и сериализацию
+
+- Компоненты без `IDisableable` больше не аллоцируют disabled-половину per-component mask-сегмента — `Components<T>.EntitiesMaskSegments` теперь аллоцирует 4 ulong на сегмент вместо 8 (минус 50% памяти масок для таких типов).
+- Per-entity сериализатор не выставляет старший `DisabledBit` в ushort размера компонента для не-`IDisableable` типов. Per-chunk сериализация не пишет disabled-маску ulong на каждый non-empty блок для таких типов.
+- Формат снапшота **самоописывающий**: `WriteChunk` пишет флаг `HasDisable` типа на момент записи, `ReadChunk` читает его из потока. Изменение членства `IDisableable` между записью и чтением снапшота безопасно — старые снапшоты не-`IDisableable` типа корректно загружаются в ставший `IDisableable` тип (все инстансы становятся enabled), и наоборот (disabled-маска прочитывается из потока, но игнорируется).
+
+### Встроенные opt-in маркеры
+
+- `IDisableable` появляется в 2.2.0 (этот раздел).
+- Существующие маркеры трекинга — `ITrackableAdded`, `ITrackableDeleted`, `ITrackableChanged` — уже работают по тому же паттерну; для них ничего не меняется.
+
+___
+
+## Сужение семантики Flexible-режима запросов
+
+В 2.1.x `QueryMode.Flexible` / `EntitiesFlexible()` через внутренний callback-механизм `OnCacheUpdate` патчил кэшированную битмаску снимка на лету при изменении фильтруемого типа на другой сущности из снимка — тем самым снимая *те же* блокеры, которые срабатывают в Strict (`Delete<T>`/`Disable<T>` для `All<T>`, `Add<T>`/`Set<T>`/`Enable<T>` для `None<T>` и т. д.). В 2.2.0 этот механизм удалён.
+
+В 2.2.0 единственная свобода Flexible сверх Strict — это entity-уровневые `Destroy`, `Disable`, `Enable` других сущностей из снимка: они по-прежнему допускаются и корректно исключают такие сущности из оставшейся итерации за счёт обновления кэшированной битмаски. Все блокеры по фильтруемым типам, ранее снимавшиеся через `OnCacheUpdate`, теперь действуют и в Flexible — ассертятся в DEBUG так же, как и в Strict (точечно по типу фильтра, см. [Запросы — QueryMode](features/query.md#querymode)).
+
+Кратко: **Flexible = Strict + разрешённые entity-уровневые `Destroy`/`Disable`/`Enable` у других сущностей из снимка.**
+
+> Примечание: в 2.2.0 ассерты strict / flexible ограничены **снимком итерации** — битмаской сущностей, прошедших фильтр на момент старта обхода. Сущности вне снимка — созданные во время итерации или не прошедшие фильтр — **не блокируются**. Код, который раньше был вынужден откладывать `entity.Add<T>()` / `entity.Set<T>()` на свежесозданной сущности до конца цикла, теперь может выполнять это прямо внутри.
+
+Код, который в Flexible-итерации делал `other.Delete<T>()` / `other.Add<T>()` / `other.Enable<T>()` / `other.Disable<T>()` для фильтруемого `T`, необходимо переписать одним из способов:
+- уничтожать / переключать сущность целиком — `other.Destroy()` / `other.Disable()` / `other.Enable()` — если это соответствует задаче;
+- собрать нужные сущности в буфер во время цикла и применить компонентные мутации после `foreach`;
+- вынести логику в отдельный проход по миру.
+
+### Удалённые публичные API
+
+- `IQueryFilter.PushQueryData<TWorld>(QueryData)` — удалён
+- `IQueryFilter.PopQueryData<TWorld>()` — удалён
+- `IQueryFilter.Assert<TWorld>()` — удалён
+- делегат `OnCacheUpdate` — удалён
+- метод `QueryData.BatchUpdate` — удалён
+- поле `QueryData.OnCacheUpdate` — удалено
+
+См. также: [Запросы — QueryMode](features/query.md#querymode), [Подводные камни](pitfalls.md#ошибки-запросов).
+
+___
+
 # Миграция с 1.2.x на 2.0.0
 
 Версия 2.0.0 — полная реструктуризация фреймворка. Практически весь пользовательский код потребует изменений.

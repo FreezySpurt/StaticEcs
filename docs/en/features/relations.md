@@ -59,6 +59,9 @@ ___
 
 Single link component — wrapper over `EntityGID` (8 bytes).
 
+{: .note }
+`Link<T>` and `Links<T>` implement `IDisableable` out of the box — `entity.Disable<Link<Parent>>()` / `Enable<Link<Parent>>()` work without any extra declaration on your link types. See [Component / Enable-Disable](component.md#enabledisable).
+
 ```csharp
 // Properties
 EntityGID value = link.Value;    // GID of the target entity (read-only)

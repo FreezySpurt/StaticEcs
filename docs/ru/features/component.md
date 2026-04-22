@@ -9,7 +9,7 @@ nav_order: 3
 - Представлен в виде пользовательской структуры с маркер-интерфейсом `IComponent`
 - Представлен как struct исключительно по соображениям производительности (SoA-хранение)
 - Поддерживает хуки жизненного цикла: `OnAdd`, `OnDelete`, `CopyTo`, `Write`, `Read`
-- Может быть включён/отключён без удаления данных
+- Может быть включён/отключён без удаления данных — opt-in через маркер `IDisableable`
 
 #### Пример:
 ```csharp
@@ -67,9 +67,8 @@ public struct Health : IComponent, IComponentConfig<Health> {
 - `noDataLifecycle` — отключить управление данными фреймворком (по умолчанию — false). При `false` фреймворк предварительно инициализирует хранилище значением `defaultValue` и сбрасывает данные к `defaultValue` при удалении. При `true` инициализация и очистка не выполняются — полезно для высокочастотных unmanaged типов. Если определён `OnDelete`, хук выполняет очистку независимо от этого флага
 - `readWriteStrategy` — стратегия бинарной сериализации (по умолчанию — авто-определение)
 - `defaultValue` — значение по умолчанию для инициализации и удаления (по умолчанию — нет)
-- `trackAdded` — включить отслеживание добавления (по умолчанию — false), см. [Отслеживание изменений](tracking)
-- `trackDeleted` — включить отслеживание удаления (по умолчанию — false), см. [Отслеживание изменений](tracking)
-- `trackChanged` — включить отслеживание изменений через `Mut<T>()` / `ref` доступ (по умолчанию — false), см. [Отслеживание изменений](tracking)
+
+Отслеживание изменений включается реализацией интерфейсов-маркеров на самом типе компонента (не через параметры конфига): `ITrackableAdded`, `ITrackableDeleted`, `ITrackableChanged`. См. [Отслеживание изменений](tracking).
 
 ___
 
@@ -130,7 +129,7 @@ velocity.Value += 10f;
 ref readonly var pos = ref entity.Read<Position>();
 var x = pos.Value.x; // чтение OK, без пометки Changed
 
-// Получить отслеживаемую мутабельную ref-ссылку — помечает как Changed если trackChanged включён
+// Получить отслеживаемую мутабельную ref-ссылку — помечает как Changed, если компонент реализует ITrackableChanged
 ref var pos = ref entity.Mut<Position>();
 pos.Value += delta; // данные изменены И помечены как Changed
 ```
@@ -165,7 +164,15 @@ entity.Delete<Position, Velocity, Name>();
 ___
 
 #### Enable/Disable:
+
+Disable/Enable — **opt-in** для каждого типа компонента через маркер-интерфейс `IDisableable`. Только компоненты с маркером `IDisableable` аллоцируют per-component disabled-битмаску, открывают `Disable<T>()`/`Enable<T>()`/`HasDisabled<T>()`/`HasEnabled<T>()` на сущности и могут использоваться в `*Disabled` фильтрах. Компоненты без маркера не платят за disabled-состояние ни памятью, ни байтами в сериализации.
+
 ```csharp
+// Помечаем компонент как disableable
+public struct Position : IComponent, IDisableable {
+    public Vector3 Value;
+}
+
 // Отключить компонент — данные сохраняются, но сущность исключается из стандартных запросов
 // Вернёт ToggleResult: MissingComponent, Unchanged или Changed
 ToggleResult disabled = entity.Disable<Position>();
@@ -194,7 +201,13 @@ bool anyDisabled = entity.HasDisabledAny<Position, Velocity>();
 ```
 
 {: .noteru }
+Все методы `Disable*`/`Enable*`/`Has*Disabled`/`Has*Enabled` имеют констрейнт `T : struct, IComponent, IDisableable` — вызов на типе без маркера это **ошибка компиляции**. То же касается фильтров `AllOnlyDisabled<T>`, `AllWithDisabled<T>`, `NoneWithDisabled<T>`, `AnyOnlyDisabled<>`, `AnyWithDisabled<>`.
+
+{: .noteru }
 Отключённые компоненты не попадают в стандартные фильтры запросов (`All`, `None`, `Any`), но данные сохраняются в памяти. Используйте `WithDisabled`/`OnlyDisabled` варианты фильтров для работы с отключёнными компонентами.
+
+{: .noteru }
+Встроенные типы `Multi<TValue>` (multi-component), `Link<TLinkType>` и `Links<TLinkType>` (отношения) уже реализуют `IDisableable` — Disable/Enable на отношениях и multi-компонентах работает без правок на стороне пользователя.
 
 ___
 

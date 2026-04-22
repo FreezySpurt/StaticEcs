@@ -219,15 +219,16 @@ ___
 // 标准初始化（baseEntitiesCapacity — 实体的初始容量）
 W.Initialize(baseEntitiesCapacity: 4096);
 
-// 使用恢复的实体标识符初始化（EntityGID 版本）
-W.InitializeFromGIDStoreSnapshot(snapshot);
+// 初始化之后可以加载已保存的快照：
+// — 仅实体标识符（EntityGID 版本）
+W.Serializer.RestoreFromGIDStoreSnapshot(snapshot);
 
-// 从快照完整恢复世界初始化
-W.InitializeFromWorldSnapshot(snapshot);
+// — 或完整的世界状态（所有实体及其数据）
+W.Serializer.LoadWorldSnapshot(snapshot);
 ```
 
 {: .notezh }
-`InitializeFromGIDStoreSnapshot` 仅恢复实体标识符元数据（GID 版本）。`InitializeFromWorldSnapshot` 恢复完整的世界状态，包括所有实体及其数据。
+`RestoreFromGIDStoreSnapshot` 仅恢复实体标识符元数据（GID 版本）。`LoadWorldSnapshot` 恢复完整的世界状态，包括所有实体及其数据。两者都要求世界已经初始化。
 
 ___
 

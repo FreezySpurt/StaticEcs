@@ -11,6 +11,7 @@ Multi-components are optimized list-components that allow storing multiple value
 - No need to create arrays or lists inside a component — zero heap allocations
 - Implements [component](component.md), all base rules apply
 - Entity [relations](relations.md) (`Links<T>`) are built on top of multi-components
+- The container component `Multi<TValue>` implements `IDisableable` out of the box — `entity.Disable<Multi<MyValue>>()` / `Enable<Multi<MyValue>>()` work without extra declaration. See [Component / Enable-Disable](component.md#enabledisable)
 
 ___
 

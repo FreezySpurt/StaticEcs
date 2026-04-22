@@ -9,7 +9,7 @@ Component gives an entity data and properties
 - Represented as a user struct with the `IComponent` marker interface
 - Implemented as struct purely for performance reasons (SoA storage)
 - Supports lifecycle hooks: `OnAdd`, `OnDelete`, `CopyTo`, `Write`, `Read`
-- Can be enabled/disabled without removing data
+- Can be enabled/disabled without removing data — opt-in via the `IDisableable` marker
 
 #### Example:
 ```csharp
@@ -67,9 +67,8 @@ public struct Health : IComponent, IComponentConfig<Health> {
 - `noDataLifecycle` — disable framework data management (default — false). When `false`, the framework pre-initializes new storage with `defaultValue` and resets data to `defaultValue` on deletion. When `true`, no initialization or cleanup is performed — useful for high-frequency unmanaged types. If `OnDelete` is defined, the hook handles cleanup regardless of this flag
 - `readWriteStrategy` — binary serialization strategy (default — auto-detected)
 - `defaultValue` — default value for init and deletion (default — none)
-- `trackAdded` — enable addition tracking (default — false), see [Change Tracking](tracking)
-- `trackDeleted` — enable deletion tracking (default — false), see [Change Tracking](tracking)
-- `trackChanged` — enable change tracking via `Mut<T>()` / `ref` access (default — false), see [Change Tracking](tracking)
+
+Change tracking is enabled by implementing marker interfaces on the component type itself (not via config flags): `ITrackableAdded`, `ITrackableDeleted`, `ITrackableChanged`. See [Change Tracking](tracking).
 
 ___
 
@@ -130,7 +129,7 @@ velocity.Value += 10f;
 ref readonly var pos = ref entity.Read<Position>();
 var x = pos.Value.x; // reading OK, no Changed mark
 
-// Get a tracked mutable ref — marks as Changed if trackChanged is enabled
+// Get a tracked mutable ref — marks as Changed if the component implements ITrackableChanged
 ref var pos = ref entity.Mut<Position>();
 pos.Value += delta; // data modified AND marked as Changed
 ```
@@ -165,7 +164,15 @@ entity.Delete<Position, Velocity, Name>();
 ___
 
 #### Enable/Disable:
+
+Disable/Enable is **opt-in** per component type via the `IDisableable` marker interface. Only components marked `IDisableable` allocate the per-component disabled bitmask, expose `Disable<T>()`/`Enable<T>()`/`HasDisabled<T>()`/`HasEnabled<T>()` on the entity, and can appear in `*Disabled` query filters. Components without the marker pay no memory or serialization overhead for the disabled state.
+
 ```csharp
+// Mark the component as disableable
+public struct Position : IComponent, IDisableable {
+    public Vector3 Value;
+}
+
 // Disable a component — data is preserved, but entity is excluded from standard queries
 // Returns ToggleResult: MissingComponent, Unchanged, or Changed
 ToggleResult disabled = entity.Disable<Position>();
@@ -194,7 +201,13 @@ bool anyDisabled = entity.HasDisabledAny<Position, Velocity>();
 ```
 
 {: .note }
+All `Disable*`/`Enable*`/`Has*Disabled`/`Has*Enabled` methods constrain `T : struct, IComponent, IDisableable` — calling them on a type without the marker is a **compile-time error**. The same applies to `AllOnlyDisabled<T>`, `AllWithDisabled<T>`, `NoneWithDisabled<T>`, `AnyOnlyDisabled<>`, `AnyWithDisabled<>` query filters.
+
+{: .note }
 Disabled components are excluded from standard query filters (`All`, `None`, `Any`), but their data remains in memory. Use `WithDisabled`/`OnlyDisabled` filter variants to work with disabled components.
+
+{: .note }
+Built-in component types `Multi<TValue>` (multi-component), `Link<TLinkType>` and `Links<TLinkType>` (relations) implement `IDisableable` out of the box — Disable/Enable on relations and multi-components works without changes on your side.
 
 ___
 

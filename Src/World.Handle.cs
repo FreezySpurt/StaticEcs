@@ -54,18 +54,20 @@ namespace FFS.Libraries.StaticEcs {
         private readonly unsafe delegate*<Type, ref EventsHandle> _getEventsHandle;
         private readonly unsafe delegate*<ReadOnlySpan<EventsHandle>> _getAllEventsHandles;
         private readonly unsafe delegate*<Type, bool> _hasResource;
-        private readonly unsafe delegate*<Type, object, bool, void> _setResource;
-        private readonly unsafe delegate*<Type, object> _getResource;
+        private readonly unsafe delegate*<Type, IResource, bool, void> _setResource;
+        private readonly unsafe delegate*<Type, IResource> _getResource;
         private readonly unsafe delegate*<Type, void> _removeResource;
         private readonly unsafe delegate*<string, bool> _hasResourceByKey;
-        private readonly unsafe delegate*<string, object> _getResourceByKey;
-        private readonly unsafe delegate*<string, object, bool, void> _setResourceByKey;
+        private readonly unsafe delegate*<string, IResource> _getResourceByKey;
+        private readonly unsafe delegate*<string, IResource, bool, void> _setResourceByKey;
         private readonly unsafe delegate*<string, void> _removeResourceByKey;
         private readonly unsafe delegate*<IReadOnlyCollection<string>> _getAllResourcesKeys;
         private readonly unsafe delegate*<IReadOnlyCollection<Type>> _getAllResourcesTypes;
         private readonly unsafe delegate*<byte, bool> _isEntityTypeRegistered;
         private readonly unsafe delegate*<byte, uint> _calculateEntitiesCountByType;
         private readonly unsafe delegate*<byte, uint> _calculateEntitiesCapacityByType;
+        private readonly unsafe delegate*<IReadOnlyList<SystemsHandle>> _getAllSystemsHandles;
+        private readonly unsafe delegate*<Type, out SystemsHandle, bool> _tryGetSystemsHandle;
 
         /// <summary>
         /// The <see cref="Type"/> of the <c>TWorld</c> struct that this handle represents.
@@ -104,7 +106,9 @@ namespace FFS.Libraries.StaticEcs {
                 &World<TWorld>._GetAllResourcesTypes,
                 &World<TWorld>._IsEntityTypeRegistered,
                 &World<TWorld>._CalculateEntitiesCountByType,
-                &World<TWorld>._CalculateEntitiesCapacityByType
+                &World<TWorld>._CalculateEntitiesCapacityByType,
+                &World<TWorld>._GetAllSystemsHandles,
+                &World<TWorld>._TryGetSystemsHandle
             );
         }
 
@@ -126,18 +130,20 @@ namespace FFS.Libraries.StaticEcs {
             delegate*<Type, ref EventsHandle> getEventsHandle,
             delegate*<ReadOnlySpan<EventsHandle>> getAllEventsHandles,
             delegate*<Type, bool> hasResource,
-            delegate*<Type, object, bool, void> setResource,
-            delegate*<Type, object> getResource,
+            delegate*<Type, IResource, bool, void> setResource,
+            delegate*<Type, IResource> getResource,
             delegate*<Type, void> removeResource,
             delegate*<string, bool> hasResourceByKey,
-            delegate*<string, object> getResourceByKey,
-            delegate*<string, object, bool, void> setResourceByKey,
+            delegate*<string, IResource> getResourceByKey,
+            delegate*<string, IResource, bool, void> setResourceByKey,
             delegate*<string, void> removeResourceByKey,
             delegate*<IReadOnlyCollection<string>> getAllResourcesKeys,
             delegate*<IReadOnlyCollection<Type>> getAllResourcesTypes,
             delegate*<byte, bool> isEntityTypeRegistered,
             delegate*<byte, uint> calculateEntitiesCountByType,
-            delegate*<byte, uint> calculateEntitiesCapacityByType) {
+            delegate*<byte, uint> calculateEntitiesCapacityByType,
+            delegate*<IReadOnlyList<SystemsHandle>> getAllSystemsHandles,
+            delegate*<Type, out SystemsHandle, bool> tryGetSystemsHandle) {
             WorldType = worldType;
             _gidStatus = gidStatus;
             _newEntity = newEntity;
@@ -167,6 +173,8 @@ namespace FFS.Libraries.StaticEcs {
             _isEntityTypeRegistered = isEntityTypeRegistered;
             _calculateEntitiesCountByType = calculateEntitiesCountByType;
             _calculateEntitiesCapacityByType = calculateEntitiesCapacityByType;
+            _getAllSystemsHandles = getAllSystemsHandles;
+            _tryGetSystemsHandle = tryGetSystemsHandle;
         }
 
         /// <summary>
@@ -402,19 +410,19 @@ namespace FFS.Libraries.StaticEcs {
         /// The resource must have been previously set.
         /// </summary>
         /// <param name="type">Runtime type of the resource.</param>
-        /// <returns>The resource value, boxed as <see cref="object"/>.</returns>
+        /// <returns>The resource value as <see cref="IResource"/>.</returns>
         [MethodImpl(AggressiveInlining)]
-        public object GetResource(Type type) {
+        public IResource GetResource(Type type) {
             unsafe { return _getResource(type); }
         }
 
         /// <summary>
-        /// Returns a keyed resource as a boxed object.
+        /// Returns a keyed resource as <see cref="IResource"/>.
         /// </summary>
         /// <param name="key">String key identifying the resource.</param>
-        /// <returns>The resource value, boxed as <see cref="object"/>.</returns>
+        /// <returns>The resource value as <see cref="IResource"/>.</returns>
         [MethodImpl(AggressiveInlining)]
-        public object GetResource(string key) {
+        public IResource GetResource(string key) {
             unsafe { return _getResourceByKey(key); }
         }
 
@@ -437,24 +445,24 @@ namespace FFS.Libraries.StaticEcs {
         }
 
         /// <summary>
-        /// Sets (or replaces) a singleton resource, accepting the value as a boxed object.
+        /// Sets (or replaces) a singleton resource, accepting the value as <see cref="IResource"/>.
         /// </summary>
         /// <param name="type">Runtime type of the resource.</param>
         /// <param name="value">The resource value (will be stored as-is; must match the type).</param>
         /// <param name="clearOnDestroy">If <c>true</c>, the resource is cleared when the world is destroyed.</param>
         [MethodImpl(AggressiveInlining)]
-        public void SetResource(Type type, object value, bool clearOnDestroy) {
+        public void SetResource(Type type, IResource value, bool clearOnDestroy) {
             unsafe { _setResource(type, value, clearOnDestroy); }
         }
 
         /// <summary>
-        /// Sets (or replaces) a keyed resource, accepting the value as a boxed object.
+        /// Sets (or replaces) a keyed resource, accepting the value as <see cref="IResource"/>.
         /// </summary>
         /// <param name="key">String key for this resource instance.</param>
         /// <param name="value">The resource value.</param>
         /// <param name="clearOnDestroy">If <c>true</c>, the resource is cleared when the world is destroyed.</param>
         [MethodImpl(AggressiveInlining)]
-        public void SetResource(string key, object value, bool clearOnDestroy) {
+        public void SetResource(string key, IResource value, bool clearOnDestroy) {
             unsafe { _setResourceByKey(key, value, clearOnDestroy); }
         }
 
@@ -476,6 +484,31 @@ namespace FFS.Libraries.StaticEcs {
         [MethodImpl(AggressiveInlining)]
         public IReadOnlyCollection<Type> GetAllResourcesTypes() {
             unsafe { return _getAllResourcesTypes(); }
+        }
+        #endregion
+
+        #region SYSTEMS
+        /// <summary>
+        /// Returns handles for every <see cref="World{TWorld}.Systems{TSystemsType}"/> pipeline
+        /// currently registered for this world. Useful for editor/inspector tools that need
+        /// to enumerate all systems groups and their resources without knowing the concrete
+        /// <c>TSystemsType</c> at compile time.
+        /// </summary>
+        /// <returns>Read-only list of <see cref="StaticEcs.SystemsHandle"/> instances, one per active pipeline.</returns>
+        [MethodImpl(AggressiveInlining)]
+        public IReadOnlyList<SystemsHandle> GetAllSystemsHandles() {
+            unsafe { return _getAllSystemsHandles(); }
+        }
+
+        /// <summary>
+        /// Looks up a <see cref="StaticEcs.SystemsHandle"/> by its <c>TSystemsType</c> runtime type.
+        /// </summary>
+        /// <param name="systemsType">The runtime <see cref="Type"/> of the <c>TSystemsType</c> struct.</param>
+        /// <param name="handle">The resulting handle. Valid only when the method returns <c>true</c>.</param>
+        /// <returns><c>true</c> if a systems pipeline with the given type is registered for this world.</returns>
+        [MethodImpl(AggressiveInlining)]
+        public bool TryGetSystemsHandle(Type systemsType, out SystemsHandle handle) {
+            unsafe { return _tryGetSystemsHandle(systemsType, out handle); }
         }
         #endregion
     }
@@ -508,7 +541,7 @@ namespace FFS.Libraries.StaticEcs {
         private readonly unsafe delegate*<void> _hardReset;
         private readonly unsafe delegate*<StringBuilder, uint, void> _tryToStringComponent;
         // serialization
-        private readonly unsafe delegate*<ref BinaryPackWriter, uint, void> _writeChunk;
+        private readonly unsafe delegate*<ref BinaryPackWriter, uint, bool, void> _writeChunk;
         private readonly unsafe delegate*<ref BinaryPackReader, uint, void> _readChunk;
         private readonly unsafe delegate*<ref BinaryPackWriter, uint, bool, bool> _writeEntity;
         private readonly unsafe delegate*<ref BinaryPackReader, uint, void> _readEntity;
@@ -578,12 +611,21 @@ namespace FFS.Libraries.StaticEcs {
         internal static unsafe ComponentsHandle Create<TWorld, TComponent>()
             where TWorld : struct, IWorldType
             where TComponent : struct, IComponentOrTag {
+            #if FFS_ECS_DEBUG
+            ref var instance = ref World<TWorld>.Components<TComponent>.instance;
+            if (!instance.IsRegistered) {
+                throw new StaticEcsException($"Component {typeof(TComponent).GenericName()} is not registered.");
+            }
+            #else
+            ref var instance = ref World<TWorld>.Components<TComponent>.Instance;
+            #endif
+            
             return new ComponentsHandle(
                 typeof(TComponent),
                 typeof(TWorld),
-                World<TWorld>.Components<TComponent>.Instance.Guid,
-                World<TWorld>.Components<TComponent>.Instance.DynamicId,
-                World<TWorld>.Components<TComponent>.Instance.IsTag,
+                instance.Guid,
+                instance.DynamicId,
+                instance.IsTag,
                 &World<TWorld>.Components<TComponent>._Initialize,
                 &World<TWorld>.Components<TComponent>._Resize,
                 &World<TWorld>.Components<TComponent>._Destroy,
@@ -637,7 +679,7 @@ namespace FFS.Libraries.StaticEcs {
             delegate*<void> destroy,
             delegate*<void> hardReset,
             delegate*<StringBuilder, uint, void> tryToStringComponent,
-            delegate*<ref BinaryPackWriter, uint, void> writeChunk,
+            delegate*<ref BinaryPackWriter, uint, bool, void> writeChunk,
             delegate*<ref BinaryPackReader, uint, void> readChunk,
             delegate*<ref BinaryPackWriter, uint, bool, bool> writeEntity,
             delegate*<ref BinaryPackReader, uint, void> readEntity,
@@ -759,8 +801,8 @@ namespace FFS.Libraries.StaticEcs {
 
         #region SERIALIZATION
         [MethodImpl(AggressiveInlining)]
-        internal void WriteChunk(ref BinaryPackWriter writer, uint chunkIdx) {
-            unsafe { _writeChunk(ref writer, chunkIdx); }
+        internal void WriteChunk(ref BinaryPackWriter writer, uint chunkIdx, bool withTracking) {
+            unsafe { _writeChunk(ref writer, chunkIdx, withTracking); }
         }
 
         [MethodImpl(AggressiveInlining)]

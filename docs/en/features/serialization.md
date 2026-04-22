@@ -151,16 +151,17 @@ W.Types()
 
 #### Full configuration:
 ```csharp
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
     public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."), // stable identifier for serialization (default — auto-computed from type name)
-        trackAdded: true,                // enable addition tracking (default — false)
-        trackDeleted: true               // enable deletion tracking (default — false)
+        guid: new Guid("A1B2C3D4-...") // stable identifier for serialization (default — auto-computed from type name)
     );
 }
 
 W.Types().Tag<Poisoned>();
 ```
+
+Change tracking is enabled by implementing marker interfaces (`ITrackableAdded`, `ITrackableDeleted`) on the type itself — see [Change Tracking](tracking).
 
 {: .note }
 All types automatically get a stable GUID computed from the type name. To override, implement `ITagConfig<T>` on the tag struct with a custom guid.
@@ -195,23 +196,16 @@ ___
 
 ## World Snapshot
 
-Saves the full world state: all entities, components, tags, and events.
+Saves the full world state: all entities, components, tags, events, and change tracking state.
 
-#### Saving and loading during initialization:
-```csharp
-// Save the world
-byte[] worldSnapshot = W.Serializer.CreateWorldSnapshot();
-W.Destroy();
+{: .important }
+**World snapshots persist the tick and the entire tracking history.** The saved stream includes `CurrentTick`, `CurrentLastTick`, and all `TrackingBufferSize + 1` history slots — for `AllAdded<T>` / `AllChanged<T>` / `AllDeleted<T>` filters, per-entity `HasAdded/HasChanged/HasDeleted` methods, and world-level `HasCreated` tracking. After loading, tick-based tracking queries (including those using `fromTick`) return the same results as before saving.
 
-// Load the world during initialization — the simplest approach
-CreateWorld(); // Create + type registration
-W.InitializeFromWorldSnapshot(worldSnapshot);
+{: .important }
+**Configuration must match when loading.** The `TrackingBufferSize` and `TrackCreated` values of the target world must equal those saved in the snapshot. Any mismatch throws `StaticEcsException`. This is a property of the `WorldConfig` passed during world creation — changing it between save and load is not supported.
 
-// All entities and events are restored
-foreach (var entity in W.Query().Entities()) {
-    Console.WriteLine(entity.PrettyString);
-}
-```
+{: .note }
+Each snapshot begins with a 2-byte format version header (`FormatVersion = 2`) and an 8-byte snapshot size. Loading a snapshot produced by an incompatible version throws `StaticEcsException` with a clear message.
 
 #### Saving and loading after initialization:
 ```csharp
@@ -333,7 +327,8 @@ W.Destroy();
 
 // 2. Restore world with GID Store
 CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
+W.Initialize();
+W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 
 // New entities won't occupy saved entity slots
 var newEntity = W.NewEntity<Default>();
@@ -366,12 +361,10 @@ W.Serializer.CreateGIDStoreSnapshot(strategy: ChunkWritingStrategy.SelfOwner);
 // Filter by clusters
 W.Serializer.CreateGIDStoreSnapshot(clusters: new ushort[] { 0, 1 });
 
-// Initialize world from GID Store
-CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
-
 // Restore GID Store in an already initialized world
 // All entities are deleted, state is reset
+CreateWorld();
+W.Initialize();
 W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 ```
 
@@ -418,6 +411,9 @@ W.Serializer.LoadChunkSnapshot(chunkSnapshot);
 
 {: .important }
 By default, cluster and chunk snapshots **do not store** entity identifier data (only component data). If you need to load them as new entities (`entitiesAsNew: true`), specify `withEntitiesData: true` when creating the snapshot.
+
+{: .important }
+**Cluster and chunk snapshots do not save change tracking data.** Unlike world snapshots, these partial snapshots are designed for streaming and migration scenarios where the target world has its own independent tick and tracking state. Loading a cluster or chunk snapshot leaves the target world's `CurrentTick`, `CurrentLastTick`, and tracking history untouched; only entities, components, and tags are restored. If consistent tracking across partial snapshots is required, use a world snapshot instead.
 
 ___
 
@@ -467,7 +463,8 @@ byte[] gidSnapshot = W.Serializer.CreateGIDStoreSnapshot();
 W.Destroy();
 
 CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
+W.Initialize();
+W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 
 // Load in any order
 W.Serializer.LoadClusterSnapshot(clusterSnapshot);
@@ -660,6 +657,162 @@ W.Serializer.LoadEventsSnapshot("path/to/events.bin");
 
 {: .note }
 When using `CreateWorldSnapshot`, events are saved automatically (unless `writeEvents: false` is specified). Separate event serialization is needed when using `EntitiesSnapshot`.
+
+___
+
+## Resources serialization
+
+`IResource` ships with four optional default-implemented methods. Override `Guid()` to opt the resource into automatic snapshot serialization; the others are required only when the type is not unmanaged.
+
+```csharp
+public interface IResource {
+    public Guid? Guid()                                              => null;
+    public byte  Version()                                            => 0;
+    public void  Write(ref BinaryPackWriter writer)                   {}
+    public void  Read(ref BinaryPackReader reader, byte version)      {}
+}
+```
+
+#### Validation rules (checked at first `SetResource`)
+
+- Resources without `Guid` (default `null`) are silently excluded from snapshots.
+- If `Guid` is non-empty and the type is not unmanaged (a reference type, or a struct containing references) and either `Write` or `Read` is missing — `StaticEcsException` is thrown.
+- Duplicate `Guid` between two singleton resources of different types is asserted in DEBUG.
+
+#### Format selection
+
+- **Unmanaged struct without `Write`/`Read`** — framework writes/reads `Unsafe.SizeOf<T>()` raw bytes directly from `Resources<TWorld, T>.Value` / the named-resource box.
+- **Non-unmanaged type, or any version mismatch on an unmanaged type** — `Read(ref reader, savedVersion)` is invoked for migration; `Write(ref writer)` is used on save.
+
+#### Examples
+
+```csharp
+// Unmanaged singleton resource — Write/Read not required
+public struct GameSettings : IResource {
+    public float MasterVolume;
+    public bool  Vsync;
+    public Guid? Guid() => new("11111111-2222-3333-4444-555555555555");
+}
+
+// Non-unmanaged resource — Write/Read required
+public class AssetCache : IResource {
+    public Dictionary<string, byte[]> Items = new();
+
+    public Guid? Guid() => new("22222222-3333-4444-5555-666666666666");
+    public byte  Version() => 1;
+
+    public void Write(ref BinaryPackWriter writer) {
+        writer.WriteInt(Items.Count);
+        foreach (var kvp in Items) {
+            writer.WriteString16(kvp.Key);
+            writer.WriteByteArray(kvp.Value);
+        }
+    }
+
+    public void Read(ref BinaryPackReader reader, byte version) {
+        Items.Clear();
+        var count = reader.ReadInt();
+        for (var i = 0; i < count; i++) {
+            var key = reader.ReadString16();
+            Items[key] = reader.ReadByteArray();
+        }
+    }
+}
+```
+
+#### What enters the snapshot
+
+- **Singleton resources** (`SetResource<T>(value, …)`) — keyed by `Guid` of `T`.
+- **Named resources** (`SetResource<T>(key, value, …)`) — keyed by `Guid` of `T` together with the string key.
+
+`WorldSnapshot` includes both groups automatically (between events and custom-snapshot data). To save or load only resources, use the standalone API mirroring events:
+
+```csharp
+// Save
+byte[] snapshot = W.Serializer.CreateResourcesSnapshot();
+W.Serializer.CreateResourcesSnapshot("resources.bin", gzip: true);
+
+// Load
+W.Serializer.LoadResourcesSnapshot(snapshot);
+W.Serializer.LoadResourcesSnapshot("resources.bin", gzip: true);
+```
+
+On load, entries whose `Guid` is not currently registered are silently skipped (same as removed components or events) — adding or removing a resource type between save and load is forward-compatible.
+
+___
+
+## Systems serialization
+
+`ISystem` carries the same four optional methods as `IResource`. Override `Guid()` to opt a system into snapshot serialization.
+
+```csharp
+public interface ISystem {
+    public void Init()             { }
+    public void Update()           { }
+    public bool UpdateIsActive()   => true;
+    public void Destroy()          { }
+
+    public Guid? Guid()                                              => null;
+    public byte  Version()                                            => 0;
+    public void  Write(ref BinaryPackWriter writer)                   {}
+    public void  Read(ref BinaryPackReader reader, byte version)      {}
+}
+```
+
+#### Validation rules (checked at `Add<TSystem>`)
+
+- Systems without `Guid` are silently excluded from snapshots.
+- Any system declaring `Guid` **must** override both `Write` and `Read` — regardless of layout. The unmanaged fast-path does not apply: system instances live boxed inside `SystemData.System`, so framework always invokes the hooks. Missing them throws `StaticEcsException` from `Add`.
+- Duplicate `Guid` within the same `Systems<TSystemsType>` group is asserted in DEBUG.
+
+#### Example
+
+```csharp
+public class SpawnerSystem : ISystem {
+    private int _nextId;
+    private float _accumulator;
+
+    public Guid? Guid() => new("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    public byte  Version() => 1;
+
+    public void Update() { /* spawn logic */ }
+
+    public void Write(ref BinaryPackWriter writer) {
+        writer.WriteInt(_nextId);
+        writer.WriteFloat(_accumulator);
+    }
+
+    public void Read(ref BinaryPackReader reader, byte version) {
+        _nextId = reader.ReadInt();
+        _accumulator = reader.ReadFloat();
+    }
+}
+```
+
+#### `Systems<TSystemsType>.Create` accepts an explicit pipeline `Guid`
+
+```csharp
+GameSys.Create(baseSize: 64);                                                // Guid = typeof(GameSystems).GuidFromAQN()
+GameSys.Create(baseSize: 64, snapshotGuid: new("…stable-pipeline-guid…"));   // explicit, survives namespace renames
+```
+
+The pipeline registers itself in the world's snapshot registry on `Create` and unregisters on `Destroy`. `WorldSnapshot` walks all registered pipelines and writes a section per pipeline; on load, sections whose pipeline `Guid` is not currently registered are silently skipped.
+
+#### Standalone API
+
+Mirrors `Create/LoadEventsSnapshot`. Walks all registered `Systems<TSystemsType>` pipelines (and their scoped resources):
+
+```csharp
+// Save
+byte[] snapshot = W.Serializer.CreateSystemsSnapshot();
+W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
+
+// Load
+W.Serializer.LoadSystemsSnapshot(snapshot);
+W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+```
+
+Each pipeline section contains its scoped resources (singleton + named) followed by every system within it that declares a `Guid`.
 
 ___
 

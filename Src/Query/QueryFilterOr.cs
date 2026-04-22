@@ -187,27 +187,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);
@@ -270,30 +250,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-            _filter2.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-            _filter2.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-            _filter2.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);
@@ -365,33 +322,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-            _filter2.PushQueryData<TWorld>(data);
-            _filter3.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-            _filter2.PopQueryData<TWorld>();
-            _filter3.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-            _filter2.Assert<TWorld>();
-            _filter3.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);
@@ -472,36 +403,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-            _filter2.PushQueryData<TWorld>(data);
-            _filter3.PushQueryData<TWorld>(data);
-            _filter4.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-            _filter2.PopQueryData<TWorld>();
-            _filter3.PopQueryData<TWorld>();
-            _filter4.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-            _filter2.Assert<TWorld>();
-            _filter3.Assert<TWorld>();
-            _filter4.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);
@@ -591,39 +493,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-            _filter2.PushQueryData<TWorld>(data);
-            _filter3.PushQueryData<TWorld>(data);
-            _filter4.PushQueryData<TWorld>(data);
-            _filter5.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-            _filter2.PopQueryData<TWorld>();
-            _filter3.PopQueryData<TWorld>();
-            _filter4.PopQueryData<TWorld>();
-            _filter5.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-            _filter2.Assert<TWorld>();
-            _filter3.Assert<TWorld>();
-            _filter4.Assert<TWorld>();
-            _filter5.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);

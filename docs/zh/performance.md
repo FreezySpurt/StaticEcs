@@ -241,7 +241,7 @@ ___
 
 ## QueryMode
 
-默认使用 `QueryMode.Strict` — 最快的模式。仅在迭代期间需要修改**其他**实体的过滤组件/标签时使用 `QueryMode.Flexible`：
+默认使用 `QueryMode.Strict` — 最快的模式。仅当迭代逻辑需要对**其他**实体执行 `Destroy` / `Disable` / `Enable` 时才使用 `QueryMode.Flexible`（这些是 Flexible 允许的唯一额外操作；对其他实体修改过滤组件/标签类型在两种模式下仍会在 DEBUG 下断言）：
 
 ```csharp
 // Strict（默认）— 完整块的快速路径
@@ -249,10 +249,12 @@ W.Query().For(
     static (ref Position pos) => { /* ... */ }
 );
 
-// Flexible — 每次迭代重新检查位掩码
+// Flexible — 逐实体重新读取缓存位掩码，
+// 以跳过已被销毁 / 禁用 / 启用的实体。
 W.Query().For(
     static (W.Entity entity, ref Position pos) => {
-        // 可以修改其他实体上的 Position
+        // 安全：对另一个实体执行 destroy / disable / enable。
+        // 仍然禁止：修改另一个实体上的过滤组件。
     },
     queryMode: QueryMode.Flexible
 );
@@ -294,3 +296,4 @@ ___
 | Unity 中使用 Medium/High 裁剪 | 移除未使用的泛型重载 |
 | 序列化使用 `UnmanagedPackArrayStrategy<T>` | 块内存复制 |
 | IL2CPP 类型化扩展方法 | 比泛型 Entity 包装快 10–25% |
+| 仅在真正会切换的类型上标记 `IDisableable` | 未标记的组件每段 mask 内存节省 4 ulong，且在 per-entity / per-chunk 快照中省略 disabled 标志 |

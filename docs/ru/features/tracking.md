@@ -8,12 +8,12 @@ nav_order: 13
 
 StaticEcs предоставляет четыре типа отслеживания изменений, все без аллокаций и включаются явно:
 
-| Тип | Что отслеживает | Область | Где включается |
-|-----|----------------|---------|----------------|
-| **Added** | Добавление компонента/тега | Компоненты, теги | `ComponentTypeConfig` / `TagTypeConfig` |
-| **Deleted** | Удаление компонента/тега | Компоненты, теги | `ComponentTypeConfig` / `TagTypeConfig` |
-| **Changed** | Доступ к данным компонента через `ref` | Только компоненты | `ComponentTypeConfig` |
-| **Created** | Создание сущности | Весь мир | `WorldConfig.TrackCreated` |
+| Тип | Что отслеживает | Область | Как включить |
+|-----|----------------|---------|--------------|
+| **Added** | Добавление компонента/тега | Компоненты, теги | Реализовать `ITrackableAdded` на типе |
+| **Deleted** | Удаление компонента/тега | Компоненты, теги | Реализовать `ITrackableDeleted` на типе |
+| **Changed** | Доступ к данным компонента через `ref` | Только компоненты | Реализовать `ITrackableChanged` на компоненте |
+| **Created** | Создание сущности | Весь мир | `WorldConfig.TrackCreated = true` |
 
 - Bitmap-хранение: один `ulong` на 64 сущности для каждого отслеживаемого типа
 - Трекинг версионируется по тикам мира через кольцевой буфер (по умолчанию 8 тиков). Каждая система автоматически видит изменения с момента своего последнего запуска
@@ -24,46 +24,47 @@ ___
 
 ## Конфигурация
 
-Весь трекинг выключен по умолчанию и должен быть явно включён при регистрации типов.
+Весь трекинг выключен по умолчанию и включается реализацией соответствующего интерфейса-маркера на типе компонента/тега.
+
+Трекинг управляется тремя интерфейсами-маркерами, применимыми и к компонентам, и к тегам (с одним исключением ниже):
+
+| Интерфейс | Что включает |
+|-----------|--------------|
+| `ITrackableAdded` | Отслеживание добавлений (`AllAdded`, `NoneAdded`, `AnyAdded`, `Entity.HasAdded<T>()`) |
+| `ITrackableDeleted` | Отслеживание удалений (`AllDeleted`, `NoneDeleted`, `AnyDeleted`, `Entity.HasDeleted<T>()`) |
+| `ITrackableChanged` | Отслеживание изменений значения (`AllChanged`, `NoneChanged`, `AnyChanged`, `Entity.HasChanged<T>()`). Только для компонентов — на тегах игнорируется. |
+
+Фильтры запроса и методы `Entity.HasXxx<T>()` статически ограничены соответствующим интерфейсом-маркером в `where`-клаузе — отсутствие маркера даёт ошибку компиляции, а не runtime-ассерт.
+
+{: .noteru }
+Родственный opt-in маркер — `IDisableable` — управляет поддержкой Disable/Enable и `*Disabled` фильтрами по такому же паттерну compile-time-констрейнта. Описан в [Component](component.md#enabledisable). Это не трекинг, но та же идея «нет маркера → нет аллокации, нет API».
 
 ### Компоненты
 
-`ComponentTypeConfig<T>` поддерживает три флага трекинга: `trackAdded`, `trackDeleted`, `trackChanged`:
-
 ```csharp
-// Трекинг настраивается реализацией IComponentConfig<T> на типе компонента:
-public struct Health : IComponent, IComponentConfig<Health> {
+// Отслеживать все три типа изменений
+public struct Health : IComponent, ITrackableAdded, ITrackableDeleted, ITrackableChanged {
     public float Value;
-    public ComponentTypeConfig<Health> Config() => new(
-        trackAdded: true,
-        trackDeleted: true,
-        trackChanged: true
-    );
 }
 
-// Включить только одно направление
-public struct Velocity : IComponent, IComponentConfig<Velocity> {
+// Отслеживать только добавления
+public struct Velocity : IComponent, ITrackableAdded {
     public float X, Y;
-    public ComponentTypeConfig<Velocity> Config() => new(
-        trackAdded: true  // отслеживать только добавление
-    );
 }
 
-// Полная конфигурация с трекингом
-public struct Position : IComponent, IComponentConfig<Position> {
+// Совмещение с IComponentConfig<T> при необходимости кастомной конфигурации
+public struct Position : IComponent, IComponentConfig<Position>,
+                         ITrackableAdded, ITrackableDeleted, ITrackableChanged {
     public float X, Y;
     public ComponentTypeConfig<Position> Config() => new(
         guid: new Guid("..."),
-        defaultValue: default,
-        trackAdded: true,
-        trackDeleted: true,
-        trackChanged: true
+        defaultValue: default
     );
 }
 
 W.Create(WorldConfig.Default());
 //...
-// Регистрация без параметров — конфигурация читается из интерфейса
+// Регистрация без параметров — маркеры обнаруживаются через `default(T) is IMarker`
 W.Types().Component<Health>()
          .Component<Velocity>()
          .Component<Position>();
@@ -73,24 +74,15 @@ W.Initialize();
 
 ### Теги
 
-`TagTypeConfig<T>` поддерживает `trackAdded` и `trackDeleted`. Теги **не** поддерживают Changed-трекинг.
+Теги поддерживают `ITrackableAdded` и `ITrackableDeleted`. Теги **не** поддерживают Changed-трекинг — `ITrackableChanged` на теге молча игнорируется.
 
 ```csharp
-// Трекинг настраивается реализацией ITagConfig<T> на типе тега:
-public struct Unit : ITag, ITagConfig<Unit> {
-    public TagTypeConfig<Unit> Config() => new(
-        trackAdded: true,
-        trackDeleted: true
-    );
-}
+public struct Unit : ITag, ITrackableAdded, ITrackableDeleted { }
 
-// С GUID для сериализации
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
-    public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."),
-        trackAdded: true,
-        trackDeleted: true
-    );
+// С GUID для сериализации через ITagConfig<T>
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
+    public TagTypeConfig<Poisoned> Config() => new(guid: new Guid("A1B2C3D4-..."));
 }
 
 // Регистрация без параметров
@@ -116,7 +108,7 @@ W.Initialize();
 
 ### Авто-регистрация
 
-Параметры `trackAdded`, `trackDeleted` и `trackChanged`, объявленные через `IComponentConfig<T>` / `ITagConfig<T>`, автоматически подхватываются `RegisterAll()` — дополнительная настройка не требуется.
+Интерфейсы-маркеры `ITrackableAdded` / `ITrackableDeleted` / `ITrackableChanged` автоматически обнаруживаются `RegisterAll()` — дополнительная настройка не требуется. Регистрация проверяет `default(T) is ITrackableXxx` для каждого регистрируемого типа компонента/тега.
 
 ### Отключение на этапе компиляции
 
@@ -540,12 +532,17 @@ entity.Destroy();
 
 ### После десериализации
 
+- **Снимок мира** (`LoadWorldSnapshot`): всё состояние трекинга — включая `CurrentTick`, `CurrentLastTick`, все слоты кольцевого буфера по каждому компоненту/тегу с маркерами трекинга и мировую историю `TrackCreated` — восстанавливается полностью. Вызов `ClearTracking()` не требуется; после загрузки `AllAdded<T>`, `AllChanged<T>`, `AllDeleted<T>`, `Created` и per-entity методы `HasXxx(fromTick)` возвращают те же результаты, что и до сохранения. Значения `TrackingBufferSize` и `TrackCreated` целевого мира должны совпадать со значениями сохранённого мира — несовпадение приводит к `StaticEcsException`.
+- **Снимок кластера / чанка** (`LoadClusterSnapshot` / `LoadChunkSnapshot`): данные трекинга **не** сохраняются в этих частичных снимках. Их загрузка не затрагивает тик и историю трекинга целевого мира. Применённые изменения сущностей/компонентов **не** формируют биты `Added` / `Changed` / `Deleted` в целевом мире — это прямая запись масок. Если нужно, чтобы загруженные чанки участвовали в трекинге дальше, вызовите `ClearTracking()` (или его per-component / per-entity варианты) для установки чистой базы, и затем продолжайте обычным образом.
+
 ```csharp
-// ReadChunk записывает маски напрямую — трекинг НЕ срабатывает
-// ReadEntity проходит через Add — компоненты отмечаются как Added
-// Рекомендуется вызвать ClearTracking() после загрузки:
-W.Serializer.ReadChunk(ref reader);
-W.ClearTracking(); // сбросить весь трекинг — очищает все слоты кольцевого буфера
+// Снимок мира — трекинг восстанавливается полностью, дополнительных действий не нужно:
+W.Serializer.LoadWorldSnapshot(worldSnapshot);
+
+// Снимок кластера / чанка — опциональный полный сброс, если существующее
+// состояние трекинга конфликтует с только что загруженными чанками:
+W.Serializer.LoadClusterSnapshot(clusterSnapshot);
+W.ClearTracking(); // опционально; очищает все слоты кольцевого буфера
 ```
 
 ___
@@ -610,6 +607,10 @@ bool bothTagsAdded = entity.HasAdded<Unit, Player>();          // Unit И Player
 // Теги — ANY-семантика
 bool anyTagAdded = entity.HasAnyAdded<Unit, Player>();         // Unit ИЛИ Player добавлен
 bool anyTagDeleted = entity.HasAnyDeleted<Unit, Player>();     // Unit ИЛИ Player удалён
+
+// Создание сущности (требует WorldConfig.TrackCreated = true)
+bool wasCreated = entity.HasCreated();
+bool createdSinceTick5 = entity.HasCreated(fromTick: 5);
 
 // Комбинирование с проверкой наличия
 if (entity.HasAdded<Position>() && entity.Has<Position>()) {

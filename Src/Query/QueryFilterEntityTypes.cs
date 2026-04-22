@@ -34,12 +34,6 @@ namespace FFS.Libraries.StaticEcs {
             return ulong.MaxValue;
         }
 
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
-
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]
         public void Assert<TWorld>() where TWorld : struct, IWorldType {
@@ -86,12 +80,6 @@ namespace FFS.Libraries.StaticEcs {
             return ulong.MaxValue;
         }
 
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
-
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]
         public void Assert<TWorld>() where TWorld : struct, IWorldType {
@@ -137,12 +125,6 @@ namespace FFS.Libraries.StaticEcs {
         public ulong FilterEntities<TWorld>(uint segmentIdx, byte segmentBlockIdx) where TWorld : struct, IWorldType {
             return ulong.MaxValue;
         }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
 
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]
@@ -194,12 +176,6 @@ namespace FFS.Libraries.StaticEcs {
         public ulong FilterEntities<TWorld>(uint segmentIdx, byte segmentBlockIdx) where TWorld : struct, IWorldType {
             return ulong.MaxValue;
         }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
 
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]
@@ -255,12 +231,6 @@ namespace FFS.Libraries.StaticEcs {
         public ulong FilterEntities<TWorld>(uint segmentIdx, byte segmentBlockIdx) where TWorld : struct, IWorldType {
             return ulong.MaxValue;
         }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
 
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]
@@ -321,12 +291,6 @@ namespace FFS.Libraries.StaticEcs {
             return ulong.MaxValue;
         }
 
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
-
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]
         public void Assert<TWorld>() where TWorld : struct, IWorldType {
@@ -384,12 +348,6 @@ namespace FFS.Libraries.StaticEcs {
             return ulong.MaxValue;
         }
 
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
-
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]
         public void Assert<TWorld>() where TWorld : struct, IWorldType {
@@ -440,12 +398,6 @@ namespace FFS.Libraries.StaticEcs {
         public ulong FilterEntities<TWorld>(uint segmentIdx, byte segmentBlockIdx) where TWorld : struct, IWorldType {
             return ulong.MaxValue;
         }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
 
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]
@@ -501,12 +453,6 @@ namespace FFS.Libraries.StaticEcs {
         public ulong FilterEntities<TWorld>(uint segmentIdx, byte segmentBlockIdx) where TWorld : struct, IWorldType {
             return ulong.MaxValue;
         }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
 
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]
@@ -566,12 +512,6 @@ namespace FFS.Libraries.StaticEcs {
         public ulong FilterEntities<TWorld>(uint segmentIdx, byte segmentBlockIdx) where TWorld : struct, IWorldType {
             return ulong.MaxValue;
         }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
 
         #if FFS_ECS_DEBUG
         [MethodImpl(AggressiveInlining)]

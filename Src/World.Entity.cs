@@ -54,7 +54,7 @@ namespace FFS.Libraries.StaticEcs {
 
             #region BASE
             [MethodImpl(AggressiveInlining)]
-            internal Entity(uint id) => IdWithOffset = id + Const.ENTITY_ID_OFFSET;
+            public Entity(uint id) => IdWithOffset = id + Const.ENTITY_ID_OFFSET;
 
             /// <summary>
             /// The raw internal slot index (without offset). This is the same value stored in
@@ -532,249 +532,281 @@ namespace FFS.Libraries.StaticEcs {
             }
             #endregion
 
+            #region IS_MATCH
+            /// <summary>
+            /// Checks whether this entity matches the specified query filter <typeparamref name="Q"/>
+            /// using the same <see cref="IQueryFilter.FilterEntities{TWorld}"/> logic as queries.
+            /// </summary>
+            /// <typeparam name="Q">Query filter type.</typeparam>
+            /// <param name="filter">Filter value (default-initialized for stateless filters).</param>
+            /// <returns><c>true</c> if the entity passes the filter.</returns>
+            [MethodImpl(AggressiveInlining)]
+            public readonly bool IsMatch<Q>(Q filter = default) where Q : struct, IQueryFilter {
+                var id = IdWithOffset - Const.ENTITY_ID_OFFSET;
+                var segmentIdx = id >> Const.ENTITIES_IN_SEGMENT_SHIFT;
+                var segmentBlockIdx = (byte) ((id >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_SEGMENT_MASK);
+                var blockEntityMask = 1UL << (int) (id & Const.ENTITIES_IN_BLOCK_MASK);
+                return (filter.FilterEntities<TWorld>(segmentIdx, segmentBlockIdx) & blockEntityMask) != 0UL;
+            }
+            #endregion
+
             #region TRACKING
             /// <summary>
-            /// Checks whether component <typeparamref name="T"/> was added to this entity since the system's last tick (or since `fromTick` if specified).
-            /// Requires <c>TrackAdded</c> to be enabled for the component type.
+            /// Checks whether this entity was created since the system's last tick (or since `fromTick` if specified).
+            /// Requires <see cref="WorldConfig.TrackCreated"/> to be enabled (asserted in debug mode).
             /// </summary>
             [MethodImpl(AggressiveInlining)]
-            public readonly bool HasAdded<T>() where T : struct, IComponentOrTag {
+            public readonly bool HasCreated() {
+                return Data.Instance.HasCreated(this);
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            public readonly bool HasCreated(ulong fromTick) {
+                return Data.Instance.HasCreated(this, fromTick);
+            }
+
+            /// <summary>
+            /// Checks whether component <typeparamref name="T"/> was added to this entity since the system's last tick (or since `fromTick` if specified).
+            /// Requires <typeparamref name="T"/> to implement <see cref="ITrackableAdded"/>.
+            /// </summary>
+            [MethodImpl(AggressiveInlining)]
+            public readonly bool HasAdded<T>() where T : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T>.Instance.HasAdded(this);
             }
 
             [MethodImpl(AggressiveInlining)]
-            public readonly bool HasAdded<T>(ulong fromTick) where T : struct, IComponentOrTag {
+            public readonly bool HasAdded<T>(ulong fromTick) where T : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T>.Instance.HasAdded(this, fromTick);
             }
 
             /// <inheritdoc cref="HasAdded{T}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAdded<T1, T2>()
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableAdded
+                where T2 : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T1>.Instance.HasAdded(this) && Components<T2>.Instance.HasAdded(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAdded<T1, T2>(ulong fromTick)
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableAdded
+                where T2 : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T1>.Instance.HasAdded(this, fromTick) && Components<T2>.Instance.HasAdded(this, fromTick);
             }
 
             /// <inheritdoc cref="HasAdded{T}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAdded<T1, T2, T3>()
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag
-                where T3 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableAdded
+                where T2 : struct, IComponentOrTag, ITrackableAdded
+                where T3 : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T1>.Instance.HasAdded(this) && Components<T2>.Instance.HasAdded(this) && Components<T3>.Instance.HasAdded(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAdded<T1, T2, T3>(ulong fromTick)
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag
-                where T3 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableAdded
+                where T2 : struct, IComponentOrTag, ITrackableAdded
+                where T3 : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T1>.Instance.HasAdded(this, fromTick) && Components<T2>.Instance.HasAdded(this, fromTick) && Components<T3>.Instance.HasAdded(this, fromTick);
             }
 
             /// <summary>
             /// Checks whether component <typeparamref name="T"/> was deleted from this entity since the system's last tick (or since `fromTick` if specified).
-            /// Requires <c>TrackDeleted</c> to be enabled for the component type.
+            /// Requires <typeparamref name="T"/> to implement <see cref="ITrackableDeleted"/>.
             /// </summary>
             [MethodImpl(AggressiveInlining)]
-            public readonly bool HasDeleted<T>() where T : struct, IComponentOrTag {
+            public readonly bool HasDeleted<T>() where T : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T>.Instance.HasDeleted(this);
             }
 
             [MethodImpl(AggressiveInlining)]
-            public readonly bool HasDeleted<T>(ulong fromTick) where T : struct, IComponentOrTag {
+            public readonly bool HasDeleted<T>(ulong fromTick) where T : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T>.Instance.HasDeleted(this, fromTick);
             }
 
             /// <inheritdoc cref="HasDeleted{T}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDeleted<T1, T2>()
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableDeleted
+                where T2 : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T1>.Instance.HasDeleted(this) && Components<T2>.Instance.HasDeleted(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDeleted<T1, T2>(ulong fromTick)
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableDeleted
+                where T2 : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T1>.Instance.HasDeleted(this, fromTick) && Components<T2>.Instance.HasDeleted(this, fromTick);
             }
 
             /// <inheritdoc cref="HasDeleted{T}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDeleted<T1, T2, T3>()
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag
-                where T3 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableDeleted
+                where T2 : struct, IComponentOrTag, ITrackableDeleted
+                where T3 : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T1>.Instance.HasDeleted(this) && Components<T2>.Instance.HasDeleted(this) && Components<T3>.Instance.HasDeleted(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDeleted<T1, T2, T3>(ulong fromTick)
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag
-                where T3 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableDeleted
+                where T2 : struct, IComponentOrTag, ITrackableDeleted
+                where T3 : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T1>.Instance.HasDeleted(this, fromTick) && Components<T2>.Instance.HasDeleted(this, fromTick) && Components<T3>.Instance.HasDeleted(this, fromTick);
             }
 
             #if !FFS_ECS_DISABLE_CHANGED_TRACKING
             /// <summary>
             /// Checks whether component <typeparamref name="T"/> was changed on this entity since the system's last tick (or since `fromTick` if specified).
-            /// Requires <c>TrackChanged</c> to be enabled for the component type.
+            /// Requires <typeparamref name="T"/> to implement <see cref="ITrackableChanged"/>.
             /// </summary>
             [MethodImpl(AggressiveInlining)]
-            public readonly bool HasChanged<T>() where T : struct, IComponent {
+            public readonly bool HasChanged<T>() where T : struct, IComponent, ITrackableChanged {
                 return Components<T>.Instance.HasChanged(this);
             }
 
             [MethodImpl(AggressiveInlining)]
-            public readonly bool HasChanged<T>(ulong fromTick) where T : struct, IComponent {
+            public readonly bool HasChanged<T>(ulong fromTick) where T : struct, IComponent, ITrackableChanged {
                 return Components<T>.Instance.HasChanged(this, fromTick);
             }
 
             /// <inheritdoc cref="HasChanged{T}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasChanged<T1, T2>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, ITrackableChanged
+                where T2 : struct, IComponent, ITrackableChanged {
                 return Components<T1>.Instance.HasChanged(this) && Components<T2>.Instance.HasChanged(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasChanged<T1, T2>(ulong fromTick)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, ITrackableChanged
+                where T2 : struct, IComponent, ITrackableChanged {
                 return Components<T1>.Instance.HasChanged(this, fromTick) && Components<T2>.Instance.HasChanged(this, fromTick);
             }
 
             /// <inheritdoc cref="HasChanged{T}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasChanged<T1, T2, T3>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, ITrackableChanged
+                where T2 : struct, IComponent, ITrackableChanged
+                where T3 : struct, IComponent, ITrackableChanged {
                 return Components<T1>.Instance.HasChanged(this) && Components<T2>.Instance.HasChanged(this) && Components<T3>.Instance.HasChanged(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasChanged<T1, T2, T3>(ulong fromTick)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, ITrackableChanged
+                where T2 : struct, IComponent, ITrackableChanged
+                where T3 : struct, IComponent, ITrackableChanged {
                 return Components<T1>.Instance.HasChanged(this, fromTick) && Components<T2>.Instance.HasChanged(this, fromTick) && Components<T3>.Instance.HasChanged(this, fromTick);
             }
 
             /// <summary>
             /// Checks whether at least one of the specified component types was changed on this entity since the system's last tick (or since `fromTick` if specified).
-            /// Requires <c>TrackChanged</c> to be enabled for the component types.
+            /// Requires each type parameter to implement <see cref="ITrackableChanged"/>.
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyChanged<T1, T2>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, ITrackableChanged
+                where T2 : struct, IComponent, ITrackableChanged {
                 return Components<T1>.Instance.HasChanged(this) || Components<T2>.Instance.HasChanged(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyChanged<T1, T2>(ulong fromTick)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, ITrackableChanged
+                where T2 : struct, IComponent, ITrackableChanged {
                 return Components<T1>.Instance.HasChanged(this, fromTick) || Components<T2>.Instance.HasChanged(this, fromTick);
             }
 
             /// <inheritdoc cref="HasAnyChanged{T1,T2}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyChanged<T1, T2, T3>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, ITrackableChanged
+                where T2 : struct, IComponent, ITrackableChanged
+                where T3 : struct, IComponent, ITrackableChanged {
                 return Components<T1>.Instance.HasChanged(this) || Components<T2>.Instance.HasChanged(this) || Components<T3>.Instance.HasChanged(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyChanged<T1, T2, T3>(ulong fromTick)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, ITrackableChanged
+                where T2 : struct, IComponent, ITrackableChanged
+                where T3 : struct, IComponent, ITrackableChanged {
                 return Components<T1>.Instance.HasChanged(this, fromTick) || Components<T2>.Instance.HasChanged(this, fromTick) || Components<T3>.Instance.HasChanged(this, fromTick);
             }
             #endif
 
             /// <summary>
             /// Checks whether at least one of the specified component types was added to this entity since the system's last tick (or since `fromTick` if specified).
-            /// Requires <c>TrackAdded</c> to be enabled for the component types.
+            /// Requires each type parameter to implement <see cref="ITrackableAdded"/>.
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyAdded<T1, T2>()
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableAdded
+                where T2 : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T1>.Instance.HasAdded(this) || Components<T2>.Instance.HasAdded(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyAdded<T1, T2>(ulong fromTick)
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableAdded
+                where T2 : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T1>.Instance.HasAdded(this, fromTick) || Components<T2>.Instance.HasAdded(this, fromTick);
             }
 
             /// <inheritdoc cref="HasAnyAdded{T1,T2}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyAdded<T1, T2, T3>()
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag
-                where T3 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableAdded
+                where T2 : struct, IComponentOrTag, ITrackableAdded
+                where T3 : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T1>.Instance.HasAdded(this) || Components<T2>.Instance.HasAdded(this) || Components<T3>.Instance.HasAdded(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyAdded<T1, T2, T3>(ulong fromTick)
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag
-                where T3 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableAdded
+                where T2 : struct, IComponentOrTag, ITrackableAdded
+                where T3 : struct, IComponentOrTag, ITrackableAdded {
                 return Components<T1>.Instance.HasAdded(this, fromTick) || Components<T2>.Instance.HasAdded(this, fromTick) || Components<T3>.Instance.HasAdded(this, fromTick);
             }
 
             /// <summary>
             /// Checks whether at least one of the specified component types was deleted from this entity since the system's last tick (or since `fromTick` if specified).
-            /// Requires <c>TrackDeleted</c> to be enabled for the component types.
+            /// Requires each type parameter to implement <see cref="ITrackableDeleted"/>.
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyDeleted<T1, T2>()
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableDeleted
+                where T2 : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T1>.Instance.HasDeleted(this) || Components<T2>.Instance.HasDeleted(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyDeleted<T1, T2>(ulong fromTick)
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableDeleted
+                where T2 : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T1>.Instance.HasDeleted(this, fromTick) || Components<T2>.Instance.HasDeleted(this, fromTick);
             }
 
             /// <inheritdoc cref="HasAnyDeleted{T1,T2}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyDeleted<T1, T2, T3>()
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag
-                where T3 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableDeleted
+                where T2 : struct, IComponentOrTag, ITrackableDeleted
+                where T3 : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T1>.Instance.HasDeleted(this) || Components<T2>.Instance.HasDeleted(this) || Components<T3>.Instance.HasDeleted(this);
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAnyDeleted<T1, T2, T3>(ulong fromTick)
-                where T1 : struct, IComponentOrTag
-                where T2 : struct, IComponentOrTag
-                where T3 : struct, IComponentOrTag {
+                where T1 : struct, IComponentOrTag, ITrackableDeleted
+                where T2 : struct, IComponentOrTag, ITrackableDeleted
+                where T3 : struct, IComponentOrTag, ITrackableDeleted {
                 return Components<T1>.Instance.HasDeleted(this, fromTick) || Components<T2>.Instance.HasDeleted(this, fromTick) || Components<T3>.Instance.HasDeleted(this, fromTick);
             }
             #endregion
@@ -802,12 +834,13 @@ namespace FFS.Libraries.StaticEcs {
             /// <summary>
             /// Checks whether this entity has a component in the <b>disabled</b> state.
             /// Disabled components exist on the entity but are excluded from standard queries.
+            /// Requires <typeparamref name="T1"/> to be marked <see cref="IDisableable"/>.
             /// </summary>
-            /// <typeparam name="T1">Component type to check.</typeparam>
+            /// <typeparam name="T1">Component type to check. Must be marked <see cref="IDisableable"/>.</typeparam>
             /// <returns><c>true</c> if the entity has this component and it is disabled.</returns>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDisabled<T1>()
-                where T1 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasDisabled(this);
             }
 
@@ -816,17 +849,17 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDisabled<T1, T2>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasDisabled(this) && Components<T2>.Instance.HasDisabled(this);
             }
 
             /// <inheritdoc cref="HasDisabled{T1, T2}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDisabled<T1, T2, T3>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasDisabled(this) && Components<T2>.Instance.HasDisabled(this) && Components<T3>.Instance.HasDisabled(this);
             }
 
@@ -835,29 +868,30 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDisabledAny<T1, T2>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasDisabled(this) || Components<T2>.Instance.HasDisabled(this);
             }
 
             /// <inheritdoc cref="HasDisabledAny{T1, T2}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDisabledAny<T1, T2, T3>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasDisabled(this) || Components<T2>.Instance.HasDisabled(this) || Components<T3>.Instance.HasDisabled(this);
             }
 
             /// <summary>
             /// Checks whether this entity has a component in the <b>enabled</b> state.
             /// Enabled components participate in standard queries.
+            /// Requires <typeparamref name="T1"/> to be marked <see cref="IDisableable"/>.
             /// </summary>
-            /// <typeparam name="T1">Component type to check.</typeparam>
+            /// <typeparam name="T1">Component type to check. Must be marked <see cref="IDisableable"/>.</typeparam>
             /// <returns><c>true</c> if the entity has this component and it is enabled.</returns>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasEnabled<T1>()
-                where T1 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasEnabled(this);
             }
 
@@ -866,17 +900,17 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasEnabled<T1, T2>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasEnabled(this) && Components<T2>.Instance.HasEnabled(this);
             }
 
             /// <inheritdoc cref="HasEnabled{T1, T2}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasEnabled<T1, T2, T3>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasEnabled(this) && Components<T2>.Instance.HasEnabled(this) && Components<T3>.Instance.HasEnabled(this);
             }
 
@@ -885,17 +919,17 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasEnabledAny<T1, T2>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasEnabled(this) || Components<T2>.Instance.HasEnabled(this);
             }
 
             /// <inheritdoc cref="HasEnabledAny{T1, T2}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasEnabledAny<T1, T2, T3>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable {
                 return Components<T1>.Instance.HasEnabled(this) || Components<T2>.Instance.HasEnabled(this) || Components<T3>.Instance.HasEnabled(this);
             }
             #endregion
@@ -909,12 +943,16 @@ namespace FFS.Libraries.StaticEcs {
             /// Useful for temporarily "hiding" a component without the cost of removing and re-adding
             /// (e.g. disabling a physics component while an entity is in a cutscene).
             /// </para>
+            /// <para>
+            /// Requires <typeparamref name="T"/> to implement <see cref="IDisableable"/>. Components not marked
+            /// <see cref="IDisableable"/> cannot be disabled — this is a compile-time constraint.
+            /// </para>
             /// </summary>
-            /// <typeparam name="T">Component type to disable.</typeparam>
+            /// <typeparam name="T">Component type to disable. Must be marked <see cref="IDisableable"/>.</typeparam>
             /// <returns>A <see cref="ToggleResult"/> indicating what happened.</returns>
             [MethodImpl(AggressiveInlining)]
             public readonly ToggleResult Disable<T>()
-                where T : struct, IComponent {
+                where T : struct, IComponent, IDisableable {
                 return Components<T>.Instance.Disable(this);
             }
 
@@ -923,8 +961,8 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly void Disable<T1, T2>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable {
                 Components<T1>.Instance.Disable(this);
                 Components<T2>.Instance.Disable(this);
             }
@@ -932,9 +970,9 @@ namespace FFS.Libraries.StaticEcs {
             /// <inheritdoc cref="Disable{T1, T2}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly void Disable<T1, T2, T3>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable {
                 Components<T1>.Instance.Disable(this);
                 Components<T2>.Instance.Disable(this);
                 Components<T3>.Instance.Disable(this);
@@ -945,12 +983,15 @@ namespace FFS.Libraries.StaticEcs {
             /// <summary>
             /// Re-enables a previously disabled component on this entity. After enabling, the entity
             /// will appear in standard queries filtering for this component type.
+            /// <para>
+            /// Requires <typeparamref name="T"/> to implement <see cref="IDisableable"/> — compile-time constraint.
+            /// </para>
             /// </summary>
-            /// <typeparam name="T">Component type to enable.</typeparam>
+            /// <typeparam name="T">Component type to enable. Must be marked <see cref="IDisableable"/>.</typeparam>
             /// <returns>A <see cref="ToggleResult"/> indicating what happened.</returns>
             [MethodImpl(AggressiveInlining)]
             public readonly ToggleResult Enable<T>()
-                where T : struct, IComponent {
+                where T : struct, IComponent, IDisableable {
                 return Components<T>.Instance.Enable(this);
             }
 
@@ -959,8 +1000,8 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly void Enable<T1, T2>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable {
                 Components<T1>.Instance.Enable(this);
                 Components<T2>.Instance.Enable(this);
             }
@@ -968,9 +1009,9 @@ namespace FFS.Libraries.StaticEcs {
             /// <inheritdoc cref="Enable{T1, T2}()"/>
             [MethodImpl(AggressiveInlining)]
             public readonly void Enable<T1, T2, T3>()
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable {
                 Components<T1>.Instance.Enable(this);
                 Components<T2>.Instance.Enable(this);
                 Components<T3>.Instance.Enable(this);
