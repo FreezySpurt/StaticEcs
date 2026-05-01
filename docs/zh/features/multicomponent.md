@@ -11,6 +11,7 @@ nav_order: 5
 - 无需在组件内创建数组或列表 — 零堆分配
 - 实现了[组件](component.md)，所有基本规则适用
 - 实体[关系](relations.md)（`Links<T>`）基于多组件构建
+- 容器组件 `Multi<TValue>` 内置实现了 `IDisableable` — `entity.Disable<Multi<MyValue>>()` / `Enable<Multi<MyValue>>()` 无需额外声明即可使用。详见 [Component / Enable-Disable](component.md#enabledisable)
 
 ___
 

@@ -120,21 +120,84 @@ public struct Foo : IComponent { }
 ### HasOnDelete vs DataLifecycle
 OnDelete 钩子和 DataLifecycle（重置为 `DefaultValue`）是互斥的清理路径。如果组件有 OnDelete 钩子，钩子负责清理——数据不会被重置。DataLifecycle 重置仅适用于没有 OnDelete 的组件。当配置中设置 `noDataLifecycle: true` 时，框架不执行任何初始化或清理。
 
+### 在未实现 `IDisableable` 的组件上 Disable/Enable
+`Entity.Disable<T>()` / `Enable<T>()` / `HasDisabled<T>()` / `HasEnabled<T>()` 方法以及 `*Disabled` 过滤器的约束都是 `T : struct, IComponent, IDisableable`。在未标记的组件上调用是**编译期错误**，不是运行时断言。如果 2.1.x 中能编译的代码现在编译失败 — 给受影响的组件声明添加 `IDisableable`。详见[迁移到 2.2.0](migrationguide.md)。
+
 ___
 
 ## 查询错误
 
-### 违反 Strict 模式
-在默认的 Strict 查询模式下，禁止在迭代期间修改其他实体上的被过滤组件/标签类型。
+### 迭代快照与其他实体
+Strict / Flexible 的限制仅适用于**属于迭代快照的其他实体**——即在迭代开始时与过滤器匹配的实体的位掩码。快照之外的实体不受限制：可以在循环体内自由创建、配置、修改和销毁。具体包括：
+- 在迭代过程中创建的新实体（始终在快照之外，因为快照在它们创建之前就已固定）；
+- 未通过过滤的实体（不同的组件、不匹配的实体类型等）。
+
 ```csharp
-// 在 Strict 模式下错误：
+// Strict 下 OK——新实体不在快照中
 foreach (var e in W.Query<All<Position>>().Entities()) {
-    otherEntity.Delete<Position>(); // 修改了另一个实体的被过滤类型！
+    var fresh = W.NewEntity<Default>();
+    fresh.Add<Position>();
+    fresh.Set(new Velocity { ... });
 }
 
-// 正确：使用 Flexible 模式
+// Strict 下 OK——`unrelated` 不匹配 `All<Position>`
+foreach (var e in W.Query<All<Position>>().Entities()) {
+    unrelated.Add<Tag>(); // 没有 Position，不在快照中
+}
+```
+
+### 移除快照中非当前实体的匹配
+Strict 的断言（以及 Flexible 的——Flexible **不会**解除该限制）是精确的：仅当某项操作可能从快照中**非当前实体**上移除已缓存的匹配时才触发。按过滤器类型 `T`：
+
+| 过滤器              | 在快照中非当前实体上被阻止                  |
+|---------------------|-------------------------------------------|
+| `All<T>`            | `Delete<T>`、`Disable<T>`                 |
+| `AllOnlyDisabled<T>`| `Delete<T>`、`Enable<T>`                  |
+| `AllWithDisabled<T>`| `Delete<T>`                               |
+| `None<T>`           | `Add<T>`、`Set<T>`、`Enable<T>`           |
+
+对**不在过滤器中的类型**进行操作不会被阻止。对**快照之外的实体**（迭代期间新建的，或缓存掩码中位为 0 的——未通过过滤器）进行操作不会被阻止。当前实体可以任意修改。
+
+```csharp
+// 错误 —— Position 在过滤器中，otherEntity 属于快照：
+W.Query<All<Position>>().For((W.Entity e) => {
+    otherEntity.Delete<Position>(); // DEBUG 下断言
+});
+W.Query<All<Position>>().For((W.Entity e) => {
+    otherEntity.Delete<Position>(); // 在 Flexible 下同样断言
+}, queryMode: QueryMode.Flexible);
+
+// 正确 —— 在循环中打标签，循环后用一次 batch 删除：
+W.Query<All<Position>>().For((W.Entity e) => {
+    if (ShouldStrip(otherEntity)) otherEntity.Set<Marked>(); // Marked 不在过滤器中 —— 不会被阻止
+});
+W.Query<All<Position, Marked>>().BatchDelete<Position, Marked>();
+
+// 正确 —— 修改不在过滤器中的类型是允许的：
+W.Query<All<Position>>().For((W.Entity e) => {
+    otherEntity.Delete<Velocity>(); // OK：Velocity 不在过滤器中，没有阻止
+});
+
+// 正确 —— 修改快照之外的实体（新创建的或不匹配的）是允许的：
+W.Query<All<Position>>().For((W.Entity e) => {
+    var fresh = W.NewEntity<Default>();   // 按定义在快照之外
+    fresh.Set(new Position { ... });      // OK
+});
+```
+
+### 在快照中其他实体上执行实体级操作——仅 Flexible
+在迭代期间销毁、禁用或启用**快照中的其他实体**在 Strict 下被禁止（DEBUG 下断言），但在 Flexible 下允许：缓存的位掩码会被更新，使此类实体从剩余迭代中排除。
+```csharp
+// Strict 下错误：
+foreach (var e in W.Query<All<Position>>().Entities()) {
+    otherEntity.Destroy(); // DEBUG 下断言（otherEntity 在快照中）
+}
+
+// Flexible 下正确：
 foreach (var e in W.Query<All<Position>>().EntitiesFlexible()) {
-    otherEntity.Delete<Position>(); // 在 Flexible 模式下 OK
+    otherEntity.Destroy();  // OK——从剩余迭代中排除
+    otherEntity.Disable();  // OK
+    otherEntity.Enable();   // OK
 }
 ```
 
@@ -142,8 +205,23 @@ foreach (var e in W.Query<All<Position>>().EntitiesFlexible()) {
 在 `ForParallel` 期间，只能修改当前实体的数据。不要创建/销毁实体，不要修改其他实体。
 
 ### 不必要的 Flexible 模式
-Flexible 模式在每个实体上重新检查位掩码，比 Strict 慢很多。只有在确实需要修改其他实体的被过滤类型时才使用 Flexible。
+Flexible 在每一步都要重新读取缓存的位掩码，比 Strict 慢。只有在确实需要在迭代期间对快照中的其他实体执行 `Destroy` / `Disable` / `Enable` 时才使用 Flexible——这是它提供的唯一额外自由度。在循环体内创建新实体并配置它们 **不需要** Flexible：新实体在两种模式下都不属于快照。
 
+### 在 `Query<>` 过滤器中重复委托中的组件
+`WorldQuery<TFilter>` 上的 `For<T0, ...>` 重载会自动将委托签名中的组件（`ref T0`、`in T0`）加入迭代过滤器。在 `All<>` 中再次列出这些组件是错误的——这是类型重复，也是与 API 对抗的明显信号：
+```csharp
+// 错误 —— Position 和 Velocity 在 All<> 中重复
+W.Query<All<Position, Velocity>>().For(static (ref Position p, ref Velocity v) => { ... });
+
+// 正确 —— 委托中的组件自行构成过滤器
+W.Query().For(static (ref Position p, ref Velocity v) => { ... });
+
+// 正确 —— Query<> 只携带额外过滤器（标签、None、EntityIs 等）
+W.Query<None<Stunned>>().For(static (W.Entity e, ref Position p, ref Velocity v) => { ... });
+
+// 正确 —— 仅实体委托：签名中没有组件，因此过滤器必须放入 Query<All<...>>
+W.Query<All<Position>>().For(static (W.Entity e) => { ... });
+```
 ___
 
 ## 注册错误

@@ -301,6 +301,21 @@ ___
 
 ___
 
+## 查询过滤器检查
+
+`IsMatch<TFilter>` 检查实体是否通过 `Query<TFilter>` 所使用的同一过滤器。
+
+```csharp
+// 按过滤器类型检查
+bool ok = entity.IsMatch<All<Position, Velocity>>();
+
+// 传入过滤器值 — 便于组合 And/Or
+var filter = And.By(default(None<Stunned>), default(All<Player>));
+bool ready = entity.IsMatch(filter);
+```
+
+___
+
 ## 调试
 
 ```csharp

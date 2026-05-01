@@ -28,8 +28,8 @@ namespace FFS.Libraries.StaticEcs {
         /// </summary>
         /// <typeparam name="TFilter0">
         /// A filter type implementing <see cref="IQueryFilter"/>. Common filters:
-        /// <see cref="All{T0}"/>, <see cref="None{T0}"/>, <see cref="Any{T0,T1}"/>,
-        /// <see cref="TagAll{T0}"/>, <see cref="TagNone{T0}"/>, <see cref="TagAny{T0,T1}"/>.
+        /// <see cref="All{T0}"/>, <see cref="None{T0}"/>, <see cref="Any{T0,T1}"/>.
+        /// The same <c>All</c>/<c>None</c>/<c>Any</c> filters accept both components and tags.
         /// </typeparam>
         [MethodImpl(AggressiveInlining)]
         public static WorldQuery<TFilter0> Query<TFilter0>(TFilter0 filter0 = default)
@@ -90,8 +90,8 @@ namespace FFS.Libraries.StaticEcs {
         /// <para>
         /// Iteration modes:
         /// <list type="bullet">
-        /// <item><see cref="Entities"/> — strict mode (default, faster). Forbids modifying filtered types on other entities.</item>
-        /// <item><see cref="EntitiesFlexible"/> — flexible mode. Allows modifying filtered types on other entities during iteration.</item>
+        /// <item><see cref="Entities"/> — strict mode (default, faster). Forbids modifying filtered types on, and destroying/disabling/enabling, entities that are part of the iteration snapshot (i.e. entities that pass the filter and would be visited later). Entities created during iteration and entities that did not pass the filter are not part of the snapshot and remain freely mutable.</item>
+        /// <item><see cref="EntitiesFlexible"/> — flexible mode. Same restrictions on filtered-type modifications as strict, but additionally allows destroying / disabling / enabling other snapshot entities during iteration (such entities are excluded from the remaining iteration via cached bitmask updates).</item>
         /// </list>
         /// </para>
         /// <para>
@@ -111,8 +111,13 @@ namespace FFS.Libraries.StaticEcs {
             /// <summary>
             /// Returns a strict-mode iterator over matching entities. This is the default and fastest iteration mode.
             /// <para>
-            /// In strict mode, modifying filtered component/tag types on OTHER entities during iteration is forbidden
-            /// (enforced in debug builds). Only the current entity's filtered components may be safely modified.
+            /// In strict mode, the following operations are forbidden on entities that belong to the iteration
+            /// snapshot but are not the current one (enforced by assertions in debug builds): modifying filtered
+            /// component/tag types (Add/Delete/Enable/Disable), destroying entities, and changing entity status
+            /// (Disable/Enable). The "iteration snapshot" is the bitmask of entities that match the filter at the
+            /// moment iteration starts. Entities that are <b>not</b> in the snapshot — namely entities created
+            /// during iteration and entities that did not pass the filter — are not blocked and may be freely
+            /// mutated, created, or destroyed.
             /// </para>
             /// </summary>
             /// <param name="entities">Which entity lifecycle states to include (default: only enabled).</param>
@@ -123,13 +128,17 @@ namespace FFS.Libraries.StaticEcs {
                                                                  ReadOnlySpan<ushort> clusters = default) {
                 return new QueryStrictIterator<TWorld, TFilter>(clusters, Filter, entities);
             }
-
+            
             /// <summary>
-            /// Returns a flexible-mode iterator over matching entities. Slower than <see cref="Entities"/>
-            /// but allows modifying filtered component/tag types on OTHER entities during iteration.
+            /// Returns a flexible-mode iterator over matching entities. Slower than <see cref="Entities"/>,
+            /// but additionally allows destroying / disabling / enabling other snapshot entities during iteration —
+            /// such entities are excluded from the remaining iteration via cached bitmask updates.
             /// <para>
-            /// Use this when iteration logic needs to add/remove/enable/disable filtered components on non-current entities.
-            /// The iterator re-checks bitmasks on each entity to handle concurrent structural changes.
+            /// Modifying filtered component/tag types on other snapshot entities (Add/Delete/Enable/Disable of the
+            /// components the query filters on) remains forbidden in flexible mode as well and is enforced by
+            /// assertions in debug builds, same as in strict mode. As in strict mode, entities outside the iteration
+            /// snapshot (newly created or non-matching) are not blocked. Flexible differs from strict only in
+            /// tolerating entity-level destroy and status-change operations on other snapshot entities.
             /// </para>
             /// </summary>
             /// <param name="entities">Which entity lifecycle states to include (default: only enabled).</param>
@@ -180,6 +189,37 @@ namespace FFS.Libraries.StaticEcs {
                             ReadOnlySpan<ushort> clusters = default) {
                 return FindFirst(Filter, clusters, entities, out entity, true);
             }
+
+            /// <summary>
+            /// Checks whether the given <paramref name="entity"/> belongs to the result set of this query —
+            /// i.e. it passes the query's filter and lies within the configured scope.
+            /// </summary>
+            /// <param name="entity">Entity to test.</param>
+            /// <param name="entities">Which entity lifecycle states are accepted (default: only enabled).</param>
+            /// <param name="clusters">Optional cluster IDs restricting scope. Empty = all clusters.</param>
+            /// <returns><c>true</c> if the entity is contained in the query result.</returns>
+            [MethodImpl(AggressiveInlining)]
+            public bool Contains(Entity entity, EntityStatusType entities = EntityStatusType.Enabled,
+                                 ReadOnlySpan<ushort> clusters = default) {
+                switch (entities) {
+                    case EntityStatusType.Enabled when !entity.IsEnabled: return false;
+                    case EntityStatusType.Disabled when !entity.IsDisabled: return false;
+                }
+
+                var found = true;
+                if (!clusters.IsEmpty) {
+                    var clusterId = entity.ClusterId;
+                    for (var i = 0; i < clusters.Length; i++) {
+                        if (clusters[i] == clusterId) {
+                            break;
+                        }
+                    }
+
+                    found = false;
+                }
+
+                return found && entity.IsMatch(Filter);
+            }
         }
         
         /// <summary>
@@ -215,11 +255,10 @@ namespace FFS.Libraries.StaticEcs {
     /// Interface for query filter types that determine which entities match a query.
     /// Filters operate at two levels: chunk-level (coarse, via heuristic bitmasks) and entity-level (fine, via presence bitmasks).
     /// <para>
-    /// Built-in filter implementations for components:
-    /// <see cref="All{T0}"/>, <see cref="None{T0}"/>, <see cref="Any{T0, T1}"/>,
+    /// Built-in filter implementations for components and tags:
+    /// <see cref="All{T0}"/>, <see cref="None{T0}"/>, <see cref="Any{T0, T1}"/> — accept both components and tags as type arguments,
     /// <see cref="AllOnlyDisabled{T0}"/>, <see cref="AllWithDisabled{T0}"/>,
-    /// <see cref="NoneWithDisabled{T0}"/>, <see cref="AnyOnlyDisabled{T0, T1}"/>, <see cref="AnyWithDisabled{T0, T1}"/>.
-    /// For tags: <c>TagAll</c>, <c>TagNone</c>, <c>TagAny</c>.
+    /// <see cref="NoneWithDisabled{T0}"/>, <see cref="AnyOnlyDisabled{T0, T1}"/>, <see cref="AnyWithDisabled{T0, T1}"/> — components only.
     /// Combine multiple filters as query type parameters for complex matching logic.
     /// </para>
     /// </summary>
@@ -238,36 +277,23 @@ namespace FFS.Libraries.StaticEcs {
         /// </summary>
         public ulong FilterEntities<TWorld>(uint segmentIdx, byte segmentBlockIdx) where TWorld : struct, IWorldType;
 
-        /// <summary>
-        /// Registers query data for live cache updates. Called when a query begins iteration
-        /// in flexible mode, so that structural changes (Add/Delete/Enable/Disable) during iteration
-        /// can update the query's bitmask to maintain stable iteration.
-        /// </summary>
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType;
-
-        /// <summary>
-        /// Unregisters query data after iteration completes. Pairs with <see cref="PushQueryData{TWorld}"/>.
-        /// </summary>
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType;
-
         #if FFS_ECS_DEBUG
         /// <summary>
-        /// Debug-only: asserts that all component/tag types used by this filter are registered.
-        /// </summary>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType;
-
-        /// <summary>
         /// Debug-only: increments/decrements blocker counters on filtered component/tag types
-        /// to detect forbidden structural changes during strict-mode iteration.
+        /// to detect forbidden structural changes during strict-mode iteration. The check is
+        /// scoped to entities present in the current iteration snapshot; entities outside the
+        /// snapshot (created mid-iteration or non-matching) are not blocked.
         /// </summary>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType;
         #endif
 
         #if FFS_ECS_BURST
-        [MethodImpl(AggressiveInlining)]
+        #if FFS_ECS_DEBUG
+        public void BurstBlock<TWorld>(int val) where TWorld : struct, IWorldType {} // TODO
+        #endif
+        
         public ulong BurstFilterChunk<TWorld>(uint chunkIdx) where TWorld : struct, IWorldType;
 
-        [MethodImpl(AggressiveInlining)]
         public ulong BurstFilterEntities<TWorld>(uint segmentIdx, byte segmentBlockIdx) where TWorld : struct, IWorldType;
         #endif
     }
@@ -303,29 +329,41 @@ namespace FFS.Libraries.StaticEcs {
     /// </summary>
     public enum QueryMode {
         /// <summary>
-        /// Strict mode (default): forbids modifying filtered component/tag types on OTHER entities during iteration.
-        /// Faster — uses fast-path for full blocks, skips re-checking bitmasks. Use when you only
-        /// modify the currently iterated entity's filtered components, or don't modify them at all.
+        /// Strict mode (default): forbids, on entities that are part of the iteration snapshot but are not the
+        /// current one, both modifications of filtered component/tag types (Add/Delete/Enable/Disable) and
+        /// entity-level operations (Destroy/Disable/Enable). The "iteration snapshot" is the bitmask of entities
+        /// matching the filter at the moment iteration starts. Entities created during iteration and entities that
+        /// did not pass the filter are <b>not</b> in the snapshot and are not blocked — they may be freely created,
+        /// configured, mutated, or destroyed inside the loop.
+        /// Faster — uses fast-path for full blocks, skips re-checking bitmasks. Use when you do not need to
+        /// destroy / disable / enable other snapshot entities during the loop.
         /// </summary>
         Strict,
         /// <summary>
-        /// Flexible mode: allows modifying filtered component/tag types on other entities during iteration.
-        /// Slower — always re-checks bitmasks to handle concurrent structural changes. Use when
-        /// iteration logic may add/remove/enable/disable filtered components on non-current entities.
+        /// Flexible mode: allows destroying / disabling / enabling other snapshot entities during iteration — such
+        /// entities are correctly excluded from the remaining iteration via cached bitmask updates.
+        /// <para>
+        /// Modifying filtered component/tag types on other snapshot entities (Add/Delete/Enable/Disable of the
+        /// components the query filters on) is still forbidden and asserted in debug builds, same as in Strict.
+        /// As in Strict mode, entities outside the iteration snapshot (newly created or non-matching) are not
+        /// blocked. Flexible mode differs from Strict only in tolerating entity-level destroy / status-change
+        /// operations on other snapshot entities.
+        /// </para>
         /// </summary>
         Flexible
     }
 
     /// <summary>
     /// Cached bitmask for a single block (64 entities) during flexible-mode query iteration.
-    /// Allows structural changes to update the mask mid-iteration without invalidating the iterator.
+    /// Allows entity-level destroy/disable/enable operations on other entities to update the mask
+    /// mid-iteration without invalidating the iterator.
     /// </summary>
     #if ENABLE_IL2CPP
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
     [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
     #endif
     public struct BlockMaskCache {
-        /// <summary>Bitmask of matching entities in this block. Bits cleared by structural changes during iteration.</summary>
+        /// <summary>Bitmask of matching entities in this block. Bits are cleared when another entity is destroyed / disabled / enabled during flexible-mode iteration so that entity is skipped.</summary>
         public ulong EntitiesMask;
         /// <summary>Index of the next non-empty global block in the iteration chain, or -1 if this is the last block.</summary>
         public int NextGlobalBlock;
@@ -333,11 +371,11 @@ namespace FFS.Libraries.StaticEcs {
     
 
     /// <summary>
-    /// Holds the cached block masks and update callback for a single active flexible-mode query.
-    /// Registered via <see cref="IQueryFilter.PushQueryData{TWorld}"/> when flexible iteration begins,
-    /// and unregistered via <see cref="IQueryFilter.PopQueryData{TWorld}"/> when it ends.
-    /// Structural changes (Add/Delete/Enable/Disable) on filtered types invoke <see cref="Update"/>
-    /// to clear affected bits so the iterator skips entities that no longer match.
+    /// Holds the cached block masks for a single active flexible-mode query. Registered on the world's
+    /// internal entity-lifecycle update lists (<c>PushQueryDataForDestroy</c> / <c>PushQueryDataForDisable</c> /
+    /// <c>PushQueryDataForEnable</c>) when flexible iteration begins and unregistered when it ends.
+    /// Entity-level destroy and status-change operations invoke <see cref="Update"/> to clear the affected
+    /// bits so the iterator skips entities that are no longer eligible.
     /// </summary>
     #if ENABLE_IL2CPP
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
@@ -346,31 +384,10 @@ namespace FFS.Libraries.StaticEcs {
     public struct QueryData {
         /// <summary>Array of cached block masks for the active query. Indexed by global block index.</summary>
         public BlockMaskCache[] Blocks;
-        /// <summary>Optional callback for custom cache update logic. If null, the default bitwise AND is used.</summary>
-        public OnCacheUpdate OnCacheUpdate;
         
         [MethodImpl(AggressiveInlining)]
         public void Update(ulong invertedBlockEntityMask, uint segmentIdx, byte segmentBlockIdx) {
-            if (OnCacheUpdate == null) {
-                Blocks[(segmentIdx << Const.BLOCKS_IN_SEGMENT_SHIFT) + segmentBlockIdx].EntitiesMask &= invertedBlockEntityMask;
-            } else {
-                OnCacheUpdate(Blocks, invertedBlockEntityMask, segmentIdx, segmentBlockIdx, false);
-            }
-        }
-        
-        [MethodImpl(AggressiveInlining)]
-        public void BatchUpdate(uint segmentIdx, byte segmentBlockIdx) {
-            if (OnCacheUpdate == null) {
-                Blocks[(segmentIdx << Const.BLOCKS_IN_SEGMENT_SHIFT) + segmentBlockIdx].EntitiesMask = 0;
-            } else {
-                OnCacheUpdate(Blocks, 0, segmentIdx, segmentBlockIdx, true);
-            }
+            Blocks[(segmentIdx << Const.BLOCKS_IN_SEGMENT_SHIFT) + segmentBlockIdx].EntitiesMask &= invertedBlockEntityMask;
         }
     }
-
-    /// <summary>
-    /// Delegate for custom cache update logic during flexible-mode iteration.
-    /// Called when structural changes affect entities in a block being iterated.
-    /// </summary>
-    public delegate void OnCacheUpdate(BlockMaskCache[] cache, ulong invertedEntitiesMask, uint segmentIdx, byte segmentBlockIdx, bool batch);
 }

@@ -48,6 +48,12 @@ public interface ISystem {
 
     // 在 Systems.Destroy() 时调用一次
     void Destroy() { }
+
+    // 快照序列化钩子 — 重写 Guid() 以使该系统加入快照
+    Guid? Guid()                                              => null;
+    byte  Version()                                            => 0;
+    void  Write(ref BinaryPackWriter writer)                   {}
+    void  Read(ref BinaryPackReader reader, byte version)      {}
 }
 ```
 
@@ -101,8 +107,10 @@ Create() → Add() → Initialize() → Update() 循环 → Destroy()
 ```
 
 ```csharp
-// 1. 创建系统组（baseSize — 初始数组容量）
+// 1. 创建系统组（baseSize — 初始数组容量，snapshotGuid — 快照中的组标识）
 GameSys.Create(baseSize: 64);
+// 或在重命名后保持快照稳定性时使用显式组 Guid：
+// GameSys.Create(baseSize: 64, snapshotGuid: new("…stable-pipeline-guid…"));
 
 // 2. 注册系统（order 决定执行顺序）
 GameSys.Add(new InputSystem(), order: -10)
@@ -267,3 +275,46 @@ while (gameIsRunning) {
 GameSys.Destroy();
 W.Destroy();
 ```
+
+___
+
+## 快照序列化
+
+`ISystem` 提供四个可选的默认实现方法（`Guid?`、`Version`、`Write`、`Read`）— 与 `IResource` 形式相同。重写 `Guid()` 以使系统实例加入快照序列化：
+
+```csharp
+public class SpawnerSystem : ISystem {
+    private int _nextId;
+
+    public Guid? Guid() => new("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    public byte  Version() => 1;
+
+    public void Update() { /* ... */ }
+
+    public void Write(ref BinaryPackWriter writer)              => writer.WriteInt(_nextId);
+    public void Read(ref BinaryPackReader reader, byte version) => _nextId = reader.ReadInt();
+}
+```
+
+验证在 `Add<TSystem>` 时执行：
+
+- 没有 `Guid` 的系统会被静默排除在快照之外。
+- 任何声明 `Guid` 的系统必须同时重写 `Write` 和 `Read`，与布局无关（系统实例以装箱形式存储在 `SystemData` 中，因此 unmanaged 快速路径不适用）。缺少它们会抛出 `StaticEcsException`。
+- 同一 `Systems<TSystemsType>` 组内的重复 `Guid` 在 DEBUG 模式下断言。
+
+每个 `Systems<TSystemsType>.Create` 将其组注册到世界的快照注册表中；组 `Guid` 默认为 `typeof(TSystemsType).GuidFromAQN()`，可通过可选的 `snapshotGuid` 参数覆盖。`WorldSnapshot` 自动为每个组写一个段（其作用域内的资源 + 每个声明 `Guid` 的系统）；加载时未注册的组 `Guid` 段会被静默跳过。
+
+独立 API 镜像 `Create/LoadEventsSnapshot`：
+
+```csharp
+// 保存
+byte[] snapshot = W.Serializer.CreateSystemsSnapshot();
+W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
+
+// 加载
+W.Serializer.LoadSystemsSnapshot(snapshot);
+W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+```
+
+完整的格式和迁移细节：参见 [序列化 → 系统序列化](./serialization.md)。
+

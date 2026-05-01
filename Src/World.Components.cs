@@ -27,6 +27,43 @@ namespace FFS.Libraries.StaticEcs {
     public interface ITag : IComponentOrTag { }
 
     /// <summary>
+    /// Marker: enables tracking of additions for this component/tag type. When present,
+    /// registration stores the type in the tracking index and <c>Components&lt;T&gt;.Instance.TrackAdded</c> is <c>true</c>,
+    /// unlocking the <c>AllAdded</c>/<c>NoneAdded</c>/<c>AnyAdded</c> query filters and <c>Entity.HasAdded&lt;T&gt;()</c>.
+    /// </summary>
+    public interface ITrackableAdded { }
+
+    /// <summary>
+    /// Marker: enables tracking of deletions for this component/tag type. Unlocks
+    /// <c>AllDeleted</c>/<c>NoneDeleted</c>/<c>AnyDeleted</c> filters and <c>Entity.HasDeleted&lt;T&gt;()</c>.
+    /// </summary>
+    public interface ITrackableDeleted { }
+
+    /// <summary>
+    /// Marker: enables tracking of value changes for this component. Applies to <see cref="IComponent"/> only —
+    /// ignored on tag types. Unlocks <c>AllChanged</c>/<c>NoneChanged</c>/<c>AnyChanged</c> filters and <c>Entity.HasChanged&lt;T&gt;()</c>.
+    /// </summary>
+    public interface ITrackableChanged { }
+
+    /// <summary>
+    /// Marker: opts a component into Disable/Enable support. Standalone marker — Disable/Enable APIs
+    /// (<c>Entity.Disable&lt;T&gt;()</c>/<c>Enable&lt;T&gt;()</c>/<c>HasDisabled&lt;T&gt;()</c>/<c>HasEnabled&lt;T&gt;()</c>)
+    /// and the <c>AllOnlyDisabled</c>/<c>AllWithDisabled</c>/<c>NoneWithDisabled</c>/<c>AnyOnlyDisabled</c>/<c>AnyWithDisabled</c>
+    /// filters all constrain <c>T</c> to <c>struct, IComponent, IDisableable</c>, so the marker is meaningful
+    /// only when paired with <see cref="IComponent"/>.
+    /// <para>
+    /// Components without this marker pay no memory or serialization overhead for disabled state — the
+    /// per-component disabled bitmask is not allocated, and the per-entity / per-chunk disabled flag is not
+    /// written into snapshots.
+    /// </para>
+    /// <para>
+    /// Built-in component types <c>Multi&lt;TValue&gt;</c>, <c>Link&lt;TLinkType&gt;</c>, <c>Links&lt;TLinkType&gt;</c>
+    /// implement this interface — Disable/Enable on relations and multi-components works out of the box.
+    /// </para>
+    /// </summary>
+    public interface IDisableable { }
+
+    /// <summary>
     /// Marker interface for ECS data components. Components carry data (as opposed to <see cref="ITag"/> which is zero-size).
     /// Inherits hooks from <see cref="IComponentOrTag"/>.
     /// </summary>
@@ -79,8 +116,12 @@ namespace FFS.Libraries.StaticEcs {
         /// <summary>
         /// Custom serialization hook for writing this component to a binary stream.
         /// <para>
-        /// <b>Always required</b> for entity-level serialization (<c>EntitiesSnapshot</c> via
-        /// <c>CreateEntitiesSnapshotWriter</c>), regardless of whether the type is unmanaged.
+        /// <b>Required</b> for entity-level serialization (<c>EntitiesSnapshot</c> via
+        /// <c>CreateEntitiesSnapshotWriter</c>) when the component is <b>not</b> unmanaged.
+        /// For unmanaged components without this hook, the component body is written via
+        /// <c>Unsafe.WriteUnaligned</c> (raw bytes). If you implement one of <c>Write</c>/<c>Read</c>,
+        /// you must implement both — the reader picks <c>Read</c> when present and falls back
+        /// to raw <c>ReadUnaligned</c> only when neither hook is defined and the saved version matches.
         /// </para>
         /// <para>
         /// For chunk-level serialization (<c>WorldSnapshot</c>, <c>ClusterSnapshot</c>, <c>ChunkSnapshot</c>),
@@ -98,8 +139,11 @@ namespace FFS.Libraries.StaticEcs {
         /// <summary>
         /// Custom deserialization hook for reading this component from a binary stream.
         /// <para>
-        /// <b>Always required</b> for entity-level deserialization (<c>EntitiesSnapshot</c> via
-        /// <c>LoadEntitiesSnapshot</c>), regardless of whether the type is unmanaged.
+        /// <b>Required</b> for entity-level deserialization (<c>EntitiesSnapshot</c> via
+        /// <c>LoadEntitiesSnapshot</c>) when the component is <b>not</b> unmanaged, and also
+        /// for unmanaged components when migrating between non-matching <c>Version</c> values.
+        /// For unmanaged components without this hook, the body is read via
+        /// <c>Unsafe.ReadUnaligned</c> (raw bytes) — only when the saved version equals the current one.
         /// </para>
         /// <para>
         /// For chunk-level deserialization, unmanaged types with a matching version use
@@ -143,15 +187,15 @@ namespace FFS.Libraries.StaticEcs {
         Changed
     }
 
-    #if ENABLE_IL2CPP
-    [Il2CppSetOption(Option.NullChecks, false)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
-    #endif
     /// <summary>
     /// Configuration for registering a component type with <c>World&lt;TWorld&gt;.Types().Component&lt;T&gt;()</c>.
     /// Controls serialization identity (Guid), data versioning, and binary read/write strategy.
     /// </summary>
     /// <typeparam name="T">The component type being configured.</typeparam>
+    #if ENABLE_IL2CPP
+    [Il2CppSetOption(Option.NullChecks, false)]
+    [Il2CppSetOption(Option.ArrayBoundsChecks, false)]
+    #endif
     public readonly struct ComponentTypeConfig<T> where T : struct, IComponentOrTag {
         /// <summary>
         /// Stable identifier for this component type used during serialization.
@@ -197,28 +241,6 @@ namespace FFS.Libraries.StaticEcs {
         public readonly T? DefaultValue;
 
         /// <summary>
-        /// When <c>true</c>, tracks component additions — enables use of <c>Added&lt;T&gt;</c> query filter.
-        /// Requires calling <see cref="World{TWorld}.ClearTracking"/> to reset tracking state.
-        /// </summary>
-        public readonly bool? TrackAdded;
-
-        /// <summary>
-        /// When <c>true</c>, tracks component deletions — enables use of <c>Deleted&lt;T&gt;</c> query filter.
-        /// Requires calling <see cref="World{TWorld}.ClearTracking"/> to reset tracking state.
-        /// </summary>
-        public readonly bool? TrackDeleted;
-
-        #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-        /// <summary>
-        /// When <c>true</c>, tracks component changes — enables use of <c>Changed&lt;T&gt;</c> query filter.
-        /// A component is marked as changed when mutable access (<c>ref</c>) is obtained via
-        /// <c>Mut&lt;T&gt;()</c>, <c>Add&lt;T&gt;()</c>, or query iteration with writable semantics.
-        /// Requires calling <see cref="World{TWorld}.ClearTracking"/> to reset tracking state.
-        /// </summary>
-        public readonly bool? TrackChanged;
-        #endif
-
-        /// <summary>
         /// Creates a configuration for component type registration.
         /// </summary>
         /// <param name="guid">Stable serialization identifier. Default is computed via <see cref="Utils.GuidFromAQN"/>.</param>
@@ -226,46 +248,25 @@ namespace FFS.Libraries.StaticEcs {
         /// <param name="noDataLifecycle">When <c>true</c>, disables framework data lifecycle (no init, no clear). Default is <c>false</c>.</param>
         /// <param name="readWriteStrategy">Custom binary serialization strategy. Default is <see cref="StructPackArrayStrategy{T}"/>.</param>
         /// <param name="defaultValue">Default value for initialization and deletion reset. Default is <c>default(T)</c>.</param>
-        /// <param name="trackAdded">When <c>true</c>, enables tracking of component additions for <c>Added&lt;T&gt;</c> query filter.</param>
-        /// <param name="trackDeleted">When <c>true</c>, enables tracking of component deletions for <c>Deleted&lt;T&gt;</c> query filter.</param>
-        /// <param name="trackChanged">When <c>true</c>, enables tracking of component changes for <c>Changed&lt;T&gt;</c> query filter.</param>
         public ComponentTypeConfig(Guid? guid = null,
                                    byte? version = null,
                                    bool? noDataLifecycle = null,
                                    IPackArrayStrategy<T> readWriteStrategy = null,
-                                   T? defaultValue = null,
-                                   bool? trackAdded = null,
-                                   bool? trackDeleted = null,
-                                   bool? trackChanged = null) {
+                                   T? defaultValue = null) {
             Guid = guid;
             Version = version;
             NoDataLifecycle = noDataLifecycle;
             ReadWriteStrategy = readWriteStrategy;
             DefaultValue = defaultValue;
-            TrackAdded = trackAdded;
-            TrackDeleted = trackDeleted;
-            #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-            TrackChanged = trackChanged;
-            #endif
         }
 
         internal ComponentTypeConfig<T> MergeWith(ComponentTypeConfig<T> other) {
-            bool? trackChanged = null;
-            bool? otherTrackChanged = null;
-            #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-            trackChanged = TrackChanged;
-            otherTrackChanged = other.TrackChanged;
-            #endif
-
             return new ComponentTypeConfig<T>(
                 guid: Guid ?? other.Guid,
                 version: Version ?? other.Version,
                 noDataLifecycle: NoDataLifecycle ?? other.NoDataLifecycle,
                 readWriteStrategy: ReadWriteStrategy ?? other.ReadWriteStrategy,
-                defaultValue: DefaultValue ?? other.DefaultValue,
-                trackAdded: TrackAdded ?? other.TrackAdded,
-                trackDeleted: TrackDeleted ?? other.TrackDeleted,
-                trackChanged: trackChanged ?? otherTrackChanged
+                defaultValue: DefaultValue ?? other.DefaultValue
             );
         }
 
@@ -274,17 +275,12 @@ namespace FFS.Libraries.StaticEcs {
             version: 0,
             noDataLifecycle: false,
             readWriteStrategy: AutoRegistration.TryCreateUnmanagedPackArrayStrategy<T>() ?? new StructPackArrayStrategy<T>(),
-            defaultValue: null,
-            trackAdded: false,
-            trackDeleted: false,
-            trackChanged: false
+            defaultValue: null
         );
 
         internal static readonly ComponentTypeConfig<T> DefaultTag = new(
             guid: typeof(T).GuidFromAQN(),
-            version: 0,
-            trackAdded: false,
-            trackDeleted: false
+            version: 0
         );
     }
 
@@ -296,22 +292,14 @@ namespace FFS.Libraries.StaticEcs {
         /// <inheritdoc cref="ComponentTypeConfig{T}.Guid"/>>
         public readonly Guid? Guid;
 
-        /// <inheritdoc cref="ComponentTypeConfig{T}.TrackAdded"/>>
-        public readonly bool? TrackAdded;
-
-        /// <inheritdoc cref="ComponentTypeConfig{T}.TrackChanged"/>>
-        public readonly bool? TrackDeleted;
-
-        public TagTypeConfig(Guid? guid = null, bool? trackAdded = null, bool? trackDeleted = null) {
+        public TagTypeConfig(Guid? guid = null) {
             Guid = guid;
-            TrackAdded = trackAdded;
-            TrackDeleted = trackDeleted;
         }
 
         public ComponentTypeConfig<T> AsComponentConfig => AsComponentConfigInternal(this);
-        
+
         internal static ComponentTypeConfig<T> AsComponentConfigInternal(TagTypeConfig<T> config) {
-            return new ComponentTypeConfig<T>(guid: config.Guid, trackAdded: config.TrackAdded, trackDeleted: config.TrackDeleted);
+            return new ComponentTypeConfig<T>(guid: config.Guid);
         }
     }
 
@@ -357,11 +345,26 @@ namespace FFS.Libraries.StaticEcs {
             [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.NonPublicProperties)]
             #endif
             T> where T : struct, IComponentOrTag {
+            
+            #if FFS_ECS_DEBUG
+            internal static Components<T> instance;
+            
+            public static ref Components<T> Instance {
+                get {
+                    AssertWorldIsInitialized(ComponentsTypeName);
+                    if (!instance.IsRegistered) {
+                        throw new StaticEcsException($"Component {typeof(T).GenericName()} is not registered.");
+                    }
+                    return ref instance;
+                }
+            }
+            #else
             /// <summary>
             /// Singleton instance of this component storage. All public methods operate on this instance.
             /// Initialized when <c>World&lt;TWorld&gt;.Types().Component&lt;T&gt;()</c> is called.
             /// </summary>
             public static Components<T> Instance;
+            #endif
 
             /// <summary>
             /// Type-erased handle for this component type, providing access via <c>unsafe delegate*</c>
@@ -375,7 +378,11 @@ namespace FFS.Libraries.StaticEcs {
             #endif
             [MethodImpl(NoInlining)]
             internal static void AutoRegister(bool isTag) {
+                #if FFS_ECS_DEBUG
+                if (instance.IsRegistered) {
+                #else
                 if (Instance.IsRegistered) {
+                #endif
                     return;
                 }
                 ComponentTypeConfig<T> config = default;
@@ -396,34 +403,41 @@ namespace FFS.Libraries.StaticEcs {
             internal T[][] ComponentSegments;
             internal ulong[][] EntitiesMaskSegments; // 4 ulong active entities + 4 ulong disabled entities
 
-            private readonly QueryData[] _queriesToUpdateOnDelete;
-            private readonly QueryData[] _queriesToUpdateOnAdd;
-            private byte _queriesToUpdateOnDeleteCount;
-            private byte _queriesToUpdateOnAddCount;
-
             /// <summary>
             /// Whether this storage represents a tag type (no data, no enable/disable, no change tracking).
             /// </summary>
             public readonly bool IsTag;
-            
+
+            #if FFS_ECS_DEBUG
+            /// <summary>
+            /// Whether this component implements <see cref="IComponentInternal"/> (Multi&lt;&gt; / Links&lt;&gt;).
+            /// Such components are handles whose <c>OnAdd</c> hook allocates fresh backing storage,
+            /// so <c>Set</c> with a non-default value would alias or leak data.
+            /// </summary>
+            public readonly bool IsInternal;
+            #endif
+
             internal readonly bool DataLifecycle;
             internal readonly bool HasOnAdd;
             internal readonly bool HasOnDelete;
             internal readonly bool TrackAdded;
             internal readonly bool TrackDeleted;
+            internal readonly bool HasDisable;
+            internal readonly byte SegmentMaskLen;
             #if !FFS_ECS_DISABLE_CHANGED_TRACKING
             internal readonly bool TrackChanged;
             #endif
             internal readonly bool TrackAddedOrChanged;
+            internal readonly bool AnyTracking;
+            internal readonly byte AddedTrackingOffset;
             internal readonly byte DeletedTrackingOffset;
+            internal readonly byte TrackingBlocksCount;
             internal readonly T DefaultValue;
             internal ulong[][] TrackingMaskSegments;
             internal HeuristicComponentsTracking[] TrackingHeuristicChunks;
             internal HeuristicComponentsTracking[][] TrackingHistoryHeuristic;
             internal ulong[][][] TrackingHistoryMasks;
-            
-            private readonly QueryData[] _queriesToUpdateOnDisable;
-            private readonly QueryData[] _queriesToUpdateOnEnable;
+
             #if FFS_ECS_BURST
             internal ComponentLifecycleHandle<T> LifecycleHandle;
             #endif
@@ -436,10 +450,8 @@ namespace FFS.Libraries.StaticEcs {
             internal readonly ulong _idMaskInv;
             internal readonly ushort _idDiv;
             internal ushort _chunkHeuristicWorldMaskLen;
-            private byte _queriesToUpdateOnDisableCount;
-            private byte _queriesToUpdateOnEnableCount;
             internal readonly bool HasDefaultValue;
-
+            
             /// <summary>
             /// Runtime-assigned numeric identifier for this component type within the world.
             /// Assigned sequentially during registration (starting from 0). Used internally for
@@ -451,6 +463,7 @@ namespace FFS.Libraries.StaticEcs {
             internal readonly bool HasWrite;
             internal readonly bool HasRead;
             internal readonly bool Unmanaged;
+            internal readonly int UnmanagedSize;
 
             private readonly IPackArrayStrategy<T> _readWriteArrayStrategy;
             private readonly IPackArrayStrategyResettable _resettableStrategy;
@@ -505,8 +518,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly bool Has(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 #endif
                 
@@ -521,13 +532,11 @@ namespace FFS.Libraries.StaticEcs {
 
             /// <summary>
             /// Checks whether component <typeparamref name="T"/> was added to this entity since the system's last tick (or since `fromTick` if specified).
-            /// Requires <c>TrackAdded</c> to be enabled (asserted in debug mode).
+            /// Requires <typeparamref name="T"/> to implement <see cref="ITrackableAdded"/> (asserted in debug mode).
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAdded(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertComponentTrackAdded<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 #endif
@@ -538,14 +547,12 @@ namespace FFS.Libraries.StaticEcs {
                 var trackingSegments = TrackingMaskSegments;
                 if (trackingSegments == null) return false;
                 var maskSegment = trackingSegments[segmentIdx];
-                return maskSegment != null && (maskSegment[segmentBlockIdx] & blockEntityMask) != 0;
+                return maskSegment != null && (maskSegment[segmentBlockIdx + AddedTrackingOffset] & blockEntityMask) != 0;
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasAdded(Entity entity, ulong fromTick) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertComponentTrackAdded<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 #endif
@@ -559,13 +566,11 @@ namespace FFS.Libraries.StaticEcs {
 
             /// <summary>
             /// Checks whether component <typeparamref name="T"/> was deleted from this entity since the system's last tick (or since `fromTick` if specified).
-            /// Requires <c>TrackDeleted</c> to be enabled (asserted in debug mode).
+            /// Requires <typeparamref name="T"/> to implement <see cref="ITrackableDeleted"/> (asserted in debug mode).
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDeleted(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertComponentTrackDeleted<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 #endif
@@ -582,8 +587,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDeleted(Entity entity, ulong fromTick) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertComponentTrackDeleted<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 #endif
@@ -598,13 +601,11 @@ namespace FFS.Libraries.StaticEcs {
             #if !FFS_ECS_DISABLE_CHANGED_TRACKING
             /// <summary>
             /// Checks whether component <typeparamref name="T"/> was changed on this entity since the system's last tick (or since `fromTick` if specified).
-            /// Requires <c>TrackChanged</c> to be enabled (asserted in debug mode).
+            /// Requires <typeparamref name="T"/> to implement <see cref="ITrackableChanged"/> (asserted in debug mode).
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasChanged(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
                 AssertComponentTrackChanged<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
@@ -616,14 +617,12 @@ namespace FFS.Libraries.StaticEcs {
                 var trackingSegments = TrackingMaskSegments;
                 if (trackingSegments == null) return false;
                 var maskSegment = trackingSegments[segmentIdx];
-                return maskSegment != null && (maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] & blockEntityMask) != 0;
+                return maskSegment != null && (maskSegment[segmentBlockIdx] & blockEntityMask) != 0;
             }
 
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasChanged(Entity entity, ulong fromTick) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
                 AssertComponentTrackChanged<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
@@ -647,12 +646,11 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasDisabled(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
+                AssertComponentDisableable<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 #endif
-                
+
                 var entityId = entity.IdWithOffset - Const.ENTITY_ID_OFFSET;
                 var segmentIdx = entityId >> Const.ENTITIES_IN_SEGMENT_SHIFT;
                 var segmentBlockIdx = (byte) ((entityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_SEGMENT_MASK);
@@ -672,12 +670,11 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly bool HasEnabled(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
+                AssertComponentDisableable<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 #endif
-                
+
                 var entityId = entity.IdWithOffset - Const.ENTITY_ID_OFFSET;
                 var segmentIdx = entityId >> Const.ENTITIES_IN_SEGMENT_SHIFT;
                 var segmentBlockIdx = (byte) ((entityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_SEGMENT_MASK);
@@ -703,9 +700,8 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly ToggleResult Disable(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
+                AssertComponentDisableable<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertNotBlockedByQuery(ComponentsTypeName, entity, _blockerDisable);
                 AssertNotBlockedByParallelQuery(ComponentsTypeName, entity);
@@ -727,9 +723,6 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 disabledMask |= blockEntityMask;
-                for (uint i = 0; i < _queriesToUpdateOnDisableCount; i++) {
-                    _queriesToUpdateOnDisable[i].Update(~blockEntityMask, segmentIdx, segmentBlockIdx);
-                }
                 return ToggleResult.Changed;
             }
 
@@ -747,9 +740,8 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly ToggleResult Enable(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
+                AssertComponentDisableable<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertNotBlockedByQuery(ComponentsTypeName, entity, _blockerEnable);
                 AssertNotBlockedByParallelQuery(ComponentsTypeName, entity);
@@ -771,9 +763,6 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 disabledMask &= ~blockEntityMask;
-                for (uint i = 0; i < _queriesToUpdateOnEnableCount; i++) {
-                    _queriesToUpdateOnEnable[i].Update(~blockEntityMask, segmentIdx, segmentBlockIdx);
-                }
                 return ToggleResult.Changed;
             }
 
@@ -792,8 +781,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly ref T Ref(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertEntityHasComponent<T>(ComponentsTypeName, entity);
@@ -813,8 +800,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly ref readonly T Read(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertEntityHasComponent<T>(ComponentsTypeName, entity);
@@ -835,8 +820,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public ref T Mut(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertEntityHasComponent<T>(ComponentsTypeName, entity);
@@ -849,7 +832,7 @@ namespace FFS.Libraries.StaticEcs {
                     var blockEntityMask = 1UL << (byte)(entityId & Const.ENTITIES_IN_BLOCK_MASK);
                     ref var seg = ref TrackingMaskSegments[segmentIdx];
                     seg ??= AllocateTrackingSegment(segmentIdx);
-                    seg[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] |= blockEntityMask;
+                    seg[segmentBlockIdx] |= blockEntityMask;
                     var chunkBlockIdx = (byte)((entityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_CHUNK_MASK);
                     TrackingHeuristicChunks[entityId >> Const.ENTITIES_IN_CHUNK_SHIFT].ChangedBlocks.SetBit(chunkBlockIdx);
                 }
@@ -873,8 +856,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public ref T Add(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertNotBlockedByQuery(ComponentsTypeName, entity, _blockerAdd);
@@ -914,10 +895,6 @@ namespace FFS.Libraries.StaticEcs {
                     HeuristicChunks[segmentIdx >> Const.SEGMENTS_IN_CHUNK_SHIFT].FullBlocks.SetBit(chunkBlockIdx);
                 }
 
-                for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                    _queriesToUpdateOnAdd[i].Update(~blockEntityMask, segmentIdx, segmentBlockIdx);
-                }
-
                 if (TrackAddedOrChanged) {
                     SetOnAddTrackingBits(entityId, segmentIdx, segmentBlockIdx, blockEntityMask);
                 }
@@ -941,8 +918,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public ref T Add(Entity entity, out bool isNew) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertNotBlockedByQuery(ComponentsTypeName, entity, _blockerAdd);
@@ -983,10 +958,6 @@ namespace FFS.Libraries.StaticEcs {
                     HeuristicChunks[segmentIdx >> Const.SEGMENTS_IN_CHUNK_SHIFT].FullBlocks.SetBit(chunkBlockIdx);
                 }
 
-                for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                    _queriesToUpdateOnAdd[i].Update(~blockEntityMask, segmentIdx, segmentBlockIdx);
-                }
-
                 if (TrackAddedOrChanged) {
                     SetOnAddTrackingBits(entityId, segmentIdx, segmentBlockIdx, blockEntityMask);
                 }
@@ -1017,9 +988,8 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public void Set(Entity entity, T value, bool withOnAdd = true) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertIsNotTag<T>(ComponentsTypeName);
+                AssertInternalSetValueIsDefault(value, ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertNotBlockedByQuery(ComponentsTypeName, entity, _blockerAdd);
                 AssertNotBlockedByParallelQuery(ComponentsTypeName, entity);
@@ -1049,10 +1019,6 @@ namespace FFS.Libraries.StaticEcs {
                     if (entitiesMask == ulong.MaxValue) {
                         var chunkBlockIdx = (byte)((entityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_CHUNK_MASK);
                         HeuristicChunks[segmentIdx >> Const.SEGMENTS_IN_CHUNK_SHIFT].FullBlocks.SetBit(chunkBlockIdx);
-                    }
-
-                    for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                        _queriesToUpdateOnAdd[i].Update(~blockEntityMask, segmentIdx, segmentBlockIdx);
                     }
 
                     if (TrackAdded) {
@@ -1098,8 +1064,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public bool Delete(Entity entity, HookReason reason = HookReason.Default, bool withOnDelete = true) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertNotBlockedByQuery(ComponentsTypeName, entity, _blockerDelete);
                 AssertNotBlockedByParallelQuery(ComponentsTypeName, entity);
@@ -1132,12 +1096,8 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 entitiesMask &= invertedBlockEntityMask;
-                if (!IsTag) {
+                if (HasDisable) {
                     maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] &= invertedBlockEntityMask;
-                }
-
-                for (uint i = 0; i < _queriesToUpdateOnDeleteCount; i++) {
-                    _queriesToUpdateOnDelete[i].Update(invertedBlockEntityMask, segmentIdx, segmentBlockIdx);
                 }
 
                 if (withOnDelete && HasOnDelete) {
@@ -1184,8 +1144,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public bool Copy(Entity source, Entity destination) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, source);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, destination);
                 #endif
@@ -1200,7 +1158,7 @@ namespace FFS.Libraries.StaticEcs {
                     if (IsTag) {
                         Set(destination);
                     } else {
-                        var disabled = (maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] & sourceBlockEntityMask) != 0;
+                        var disabled = HasDisable && (maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] & sourceBlockEntityMask) != 0;
                         var sourceSegmentEntityIdx = (byte) (sourceEntityId & Const.ENTITIES_IN_SEGMENT_MASK);
                         if (HasCopyTo) {
                             ComponentSegments[segmentIdx][sourceSegmentEntityIdx].CopyTo(source, destination, disabled);
@@ -1247,8 +1205,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public bool Set(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertNotBlockedByQuery(ComponentsTypeName, entity, _blockerAdd);
                 AssertNotBlockedByParallelQuery(ComponentsTypeName, entity);
@@ -1279,10 +1235,6 @@ namespace FFS.Libraries.StaticEcs {
                     HeuristicChunks[entityId >> Const.ENTITIES_IN_CHUNK_SHIFT].FullBlocks.SetBit(chunkBlockIdx);
                 }
 
-                for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                    _queriesToUpdateOnAdd[i].Update(~blockEntityMask, segmentIdx, segmentBlockIdx);
-                }
-
                 if (TrackAdded) {
                     SetAddedBit(entityId, segmentIdx, segmentBlockIdx, blockEntityMask);
                 }
@@ -1296,8 +1248,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public bool Toggle(Entity entity) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertIsTag<T>(ComponentsTypeName);
                 #endif
@@ -1316,8 +1266,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public void Apply(Entity entity, bool state) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 AssertIsTag<T>(ComponentsTypeName);
                 #endif
@@ -1388,8 +1336,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal void BatchAdd(QueryData queryData, int nextGlobalBlockIdx) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertMultiThreadNotActive(ComponentsTypeName);
                 #endif
 
@@ -1409,8 +1355,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal void BatchSet(QueryData queryData, int nextGlobalBlockIdx, T value) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertMultiThreadNotActive(ComponentsTypeName);
                 #endif
                 if (IsTag) {
@@ -1444,8 +1388,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal void BatchDelete(QueryData queryData, int nextGlobalBlockIdx, HookReason reason = HookReason.Default) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertMultiThreadNotActive(ComponentsTypeName);
                 #endif
 
@@ -1480,8 +1422,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal void BatchDisable(QueryData queryData, int nextGlobalBlockIdx) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertMultiThreadNotActive(ComponentsTypeName);
                 #endif
 
@@ -1501,8 +1441,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal void BatchEnable(QueryData queryData, int nextGlobalBlockIdx) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertMultiThreadNotActive(ComponentsTypeName);
                 #endif
 
@@ -1522,8 +1460,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal void BatchToggle(QueryData queryData, int nextGlobalBlockIdx) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertMultiThreadNotActive(ComponentsTypeName);
                 #endif
 
@@ -1543,8 +1479,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal void BatchApply(QueryData queryData, int nextGlobalBlockIdx, bool state) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertMultiThreadNotActive(ComponentsTypeName);
                 #endif
                 if (state) {
@@ -1557,11 +1491,6 @@ namespace FFS.Libraries.StaticEcs {
             
             [MethodImpl(AggressiveInlining)]
             internal void BatchAdd(ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx) {
-                #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
-                #endif
-
                 #if !NET6_0_OR_GREATER
                 var deBruijn = Utils.DeBruijn;
                 #endif
@@ -1590,38 +1519,9 @@ namespace FFS.Libraries.StaticEcs {
                 if (entitiesMask == 0) {
                     HeuristicChunks[chunkIdx].NotEmptyBlocks.SetBit(chunkBlockIdx);
                 }
-
-                if (!HasOnAdd && _queriesToUpdateOnAddCount == 0) {
+                
+                if (!HasOnAdd) {
                     entitiesMask |= entitiesMaskFilter;
-                }
-                else if (entitiesMaskFilter == ulong.MaxValue && !HasOnAdd) {
-                    entitiesMask = ulong.MaxValue;
-                    for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                        _queriesToUpdateOnAdd[i].BatchUpdate(segmentIdx, segmentBlockIdx);
-                    }
-                }
-                else if (!HasOnAdd) {
-                    var starts = entitiesMaskFilter & ~(entitiesMaskFilter << 1);
-                    var ends = entitiesMaskFilter & ~(entitiesMaskFilter >> 1);
-                    do {
-                        #if NET6_0_OR_GREATER
-                        var start = (byte)System.Numerics.BitOperations.TrailingZeroCount(starts);
-                        var endIncluded = (byte)System.Numerics.BitOperations.TrailingZeroCount(ends);
-                        #else
-                        var start = deBruijn[(uint)(((starts & (ulong)-(long)starts) * 0x37E84A99DAE458FUL) >> 58)];
-                        var endIncluded = deBruijn[(uint)(((ends & (ulong)-(long)ends) * 0x37E84A99DAE458FUL) >> 58)];
-                        #endif
-                        starts &= starts - 1UL;
-                        ends &= ends - 1UL;
-
-                        var runMask = ((2UL << (endIncluded - start)) - 1) << start;
-                        entitiesMask |= runMask;
-
-                        var invertedRunMask = ~runMask;
-                        for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                            _queriesToUpdateOnAdd[i].Update(invertedRunMask, segmentIdx, segmentBlockIdx);
-                        }
-                    } while (starts != 0);
                 }
                 else {
                     var entity = new Entity(baseGlobalBlockEntityIdx);
@@ -1650,11 +1550,6 @@ namespace FFS.Libraries.StaticEcs {
                             Data.Instance.SetCurrentQueryEntity(entity.IdWithOffset);
                             #endif
                             componentSegment[baseSegmentEntityIdx + start].OnAdd(entity);
-
-                            for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                                _queriesToUpdateOnAdd[i].Update(~blockEntityMask, segmentIdx, segmentBlockIdx);
-                            }
-
                             blockEntityMask <<= 1;
                             entityIdRef++;
                             start++;
@@ -1669,11 +1564,6 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             internal void BatchSet(T value, ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx) {
-                #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
-                #endif
-
                 #if !NET6_0_OR_GREATER
                 var deBruijn = Utils.DeBruijn;
                 #endif
@@ -1757,40 +1647,7 @@ namespace FFS.Libraries.StaticEcs {
                     if (entitiesMask == 0) {
                         HeuristicChunks[chunkIdx].NotEmptyBlocks.SetBit(chunkBlockIdx);
                     }
-
-                    if (_queriesToUpdateOnAddCount == 0) {
-                        entitiesMask |= newEntitiesMaskFilter;
-                    }
-                    else if (newEntitiesMaskFilter == ulong.MaxValue) {
-                        entitiesMask = ulong.MaxValue;
-                        for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                            _queriesToUpdateOnAdd[i].BatchUpdate(segmentIdx, segmentBlockIdx);
-                        }
-                    }
-                    else {
-                        var starts = newEntitiesMaskFilter & ~(newEntitiesMaskFilter << 1);
-                        var ends = newEntitiesMaskFilter & ~(newEntitiesMaskFilter >> 1);
-                        do {
-                            #if NET6_0_OR_GREATER
-                            var start = (byte)System.Numerics.BitOperations.TrailingZeroCount(starts);
-                            var endIncluded = (byte)System.Numerics.BitOperations.TrailingZeroCount(ends);
-                            #else
-                            var start = deBruijn[(uint)(((starts & (ulong)-(long)starts) * 0x37E84A99DAE458FUL) >> 58)];
-                            var endIncluded = deBruijn[(uint)(((ends & (ulong)-(long)ends) * 0x37E84A99DAE458FUL) >> 58)];
-                            #endif
-                            starts &= starts - 1UL;
-                            ends &= ends - 1UL;
-
-                            var runMask = ((2UL << (endIncluded - start)) - 1) << start;
-                            entitiesMask |= runMask;
-
-                            var invertedRunMask = ~runMask;
-                            for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                                _queriesToUpdateOnAdd[i].Update(invertedRunMask, segmentIdx, segmentBlockIdx);
-                            }
-                        } while (starts != 0);
-                    }
-
+                    entitiesMask |= newEntitiesMaskFilter;
                     if (entitiesMask == ulong.MaxValue) {
                         HeuristicChunks[chunkIdx].FullBlocks.SetBit(chunkBlockIdx);
                     }
@@ -1828,11 +1685,6 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             internal void BatchDelete(ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx, HookReason reason = HookReason.Default) {
-                #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
-                #endif
-
                 #if !NET6_0_OR_GREATER
                 var deBruijn = Utils.DeBruijn;
                 #endif
@@ -1858,21 +1710,21 @@ namespace FFS.Libraries.StaticEcs {
                     SetDeletedBitBatch(entitiesMaskFilter, segmentIdx, segmentBlockIdx, chunkBlockIdx, chunkIdx);
                 }
 
-                ref var disabledEntitiesMask = ref maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT];
+                ulong scratch = 0;
+                ref var disabledEntitiesMask = ref HasDisable 
+                    ? ref maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] 
+                    : ref scratch;
                 if (entitiesMask == ulong.MaxValue) {
                     HeuristicChunks[chunkIdx].FullBlocks.ClearBit(chunkBlockIdx);
                 }
-
-                if (!HasOnDelete && !DataLifecycle && _queriesToUpdateOnDeleteCount == 0) {
+                
+                if (!HasOnDelete && !DataLifecycle) {
                     entitiesMask &= ~entitiesMaskFilter;
                     disabledEntitiesMask &= ~entitiesMaskFilter;
                 }
                 else if (entitiesMaskFilter == ulong.MaxValue && !HasOnDelete && !DataLifecycle) {
                     entitiesMask = 0;
                     disabledEntitiesMask = 0;
-                    for (uint i = 0; i < _queriesToUpdateOnDeleteCount; i++) {
-                        _queriesToUpdateOnDelete[i].BatchUpdate(segmentIdx, segmentBlockIdx);
-                    }
                 }
                 else if (entitiesMaskFilter == ulong.MaxValue && !HasOnDelete) {
                     entitiesMask = 0;
@@ -1881,9 +1733,6 @@ namespace FFS.Libraries.StaticEcs {
                         componentSegment.AsSpan(baseSegmentEntityIdx, Const.ENTITIES_IN_BLOCK).Fill(DefaultValue);
                     } else {
                         Array.Clear(componentSegment, baseSegmentEntityIdx, Const.ENTITIES_IN_BLOCK);
-                    }
-                    for (uint i = 0; i < _queriesToUpdateOnDeleteCount; i++) {
-                        _queriesToUpdateOnDelete[i].BatchUpdate(segmentIdx, segmentBlockIdx);
                     }
                 }
                 else if (!HasOnDelete) {
@@ -1910,10 +1759,6 @@ namespace FFS.Libraries.StaticEcs {
                             componentSegment.AsSpan(baseSegmentEntityIdx + start, count).Fill(DefaultValue);
                         } else {
                             Array.Clear(componentSegment, baseSegmentEntityIdx + start, count);
-                        }
-
-                        for (uint i = 0; i < _queriesToUpdateOnDeleteCount; i++) {
-                            _queriesToUpdateOnDelete[i].Update(invertedRunMask, segmentIdx, segmentBlockIdx);
                         }
                     } while (starts != 0);
                 }
@@ -1946,11 +1791,6 @@ namespace FFS.Libraries.StaticEcs {
                             Data.Instance.SetCurrentQueryEntity(entity.IdWithOffset);
                             #endif
                             componentSegment[baseSegmentEntityIdx + start].OnDelete(entity, reason);
-
-                            for (uint i = 0; i < _queriesToUpdateOnDeleteCount; i++) {
-                                _queriesToUpdateOnDelete[i].Update(invertedBlockEntityMask, segmentIdx, segmentBlockIdx);
-                            }
-
                             blockEntityMask <<= 1;
                             entityIdRef++;
                             start++;
@@ -1969,12 +1809,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal void BatchDisable(ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
-                #endif
-
-                #if !NET6_0_OR_GREATER
-                var deBruijn = Utils.DeBruijn;
+                AssertComponentDisableable<T>(ComponentsTypeName);
                 #endif
 
                 var maskSegment = EntitiesMaskSegments[segmentIdx];
@@ -1987,51 +1822,13 @@ namespace FFS.Libraries.StaticEcs {
                     return;
                 }
 
-                ref var disabledEntitiesMask = ref maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT];
-
-                if (entitiesMaskFilter == ulong.MaxValue) {
-                    disabledEntitiesMask = ulong.MaxValue;
-                    for (uint i = 0; i < _queriesToUpdateOnDisableCount; i++) {
-                        _queriesToUpdateOnDisable[i].BatchUpdate(segmentIdx, segmentBlockIdx);
-                    }
-                }
-                else if (_queriesToUpdateOnDisableCount == 0) {
-                    disabledEntitiesMask |= entitiesMaskFilter;
-                }
-                else {
-                    var starts = entitiesMaskFilter & ~(entitiesMaskFilter << 1);
-                    var ends = entitiesMaskFilter & ~(entitiesMaskFilter >> 1);
-                    do {
-                        #if NET6_0_OR_GREATER
-                        var start = (byte)System.Numerics.BitOperations.TrailingZeroCount(starts);
-                        var endIncluded = (byte)System.Numerics.BitOperations.TrailingZeroCount(ends);
-                        #else
-                        var start = deBruijn[(uint)(((starts & (ulong)-(long)starts) * 0x37E84A99DAE458FUL) >> 58)];
-                        var endIncluded = deBruijn[(uint)(((ends & (ulong)-(long)ends) * 0x37E84A99DAE458FUL) >> 58)];
-                        #endif
-                        starts &= starts - 1UL;
-                        ends &= ends - 1UL;
-
-                        var runMask = ((2UL << (endIncluded - start)) - 1) << start;
-                        disabledEntitiesMask |= runMask;
-
-                        var invertedRunMask = ~runMask;
-                        for (uint i = 0; i < _queriesToUpdateOnDisableCount; i++) {
-                            _queriesToUpdateOnDisable[i].Update(invertedRunMask, segmentIdx, segmentBlockIdx);
-                        }
-                    } while (starts != 0);
-                }
+                maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] |= entitiesMaskFilter;
             }
-            
+
             [MethodImpl(AggressiveInlining)]
             internal void BatchEnable(ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
-                #endif
-
-                #if !NET6_0_OR_GREATER
-                var deBruijn = Utils.DeBruijn;
+                AssertComponentDisableable<T>(ComponentsTypeName);
                 #endif
 
                 var maskSegment = EntitiesMaskSegments[segmentIdx];
@@ -2044,53 +1841,11 @@ namespace FFS.Libraries.StaticEcs {
                     return;
                 }
 
-                ref var disabledEntitiesMask = ref maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT];
-
-                if (entitiesMaskFilter == ulong.MaxValue) {
-                    disabledEntitiesMask = 0;
-                    for (uint i = 0; i < _queriesToUpdateOnEnableCount; i++) {
-                        _queriesToUpdateOnEnable[i].BatchUpdate(segmentIdx, segmentBlockIdx);
-                    }
-                }
-                else if (_queriesToUpdateOnEnableCount == 0) {
-                    disabledEntitiesMask &= ~entitiesMaskFilter;
-                }
-                else {
-                    var starts = entitiesMaskFilter & ~(entitiesMaskFilter << 1);
-                    var ends = entitiesMaskFilter & ~(entitiesMaskFilter >> 1);
-                    do {
-                        #if NET6_0_OR_GREATER
-                        var start = (byte)System.Numerics.BitOperations.TrailingZeroCount(starts);
-                        var endIncluded = (byte)System.Numerics.BitOperations.TrailingZeroCount(ends);
-                        #else
-                        var start = deBruijn[(uint)(((starts & (ulong)-(long)starts) * 0x37E84A99DAE458FUL) >> 58)];
-                        var endIncluded = deBruijn[(uint)(((ends & (ulong)-(long)ends) * 0x37E84A99DAE458FUL) >> 58)];
-                        #endif
-                        starts &= starts - 1UL;
-                        ends &= ends - 1UL;
-
-                        var runMask = ((2UL << (endIncluded - start)) - 1) << start;
-                        var invertedRunMask = ~runMask;
-                        disabledEntitiesMask &= invertedRunMask;
-
-                        for (uint i = 0; i < _queriesToUpdateOnEnableCount; i++) {
-                            _queriesToUpdateOnEnable[i].Update(invertedRunMask, segmentIdx, segmentBlockIdx);
-                        }
-                    } while (starts != 0);
-                }
+                maskSegment[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] &= ~entitiesMaskFilter;
             }
             
             [MethodImpl(AggressiveInlining)]
             internal void BatchSetTag(ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx) {
-                #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
-                #endif
-
-                #if !NET6_0_OR_GREATER
-                var deBruijn = Utils.DeBruijn;
-                #endif
-
                 var baseGlobalBlockEntityIdx = (uint)((segmentIdx << Const.ENTITIES_IN_SEGMENT_SHIFT) + (segmentBlockIdx << Const.ENTITIES_IN_BLOCK_SHIFT));
                 var chunkBlockIdx = (byte)((baseGlobalBlockEntityIdx >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_CHUNK_MASK);
                 var chunkIdx = baseGlobalBlockEntityIdx >> Const.ENTITIES_IN_CHUNK_SHIFT;
@@ -2112,38 +1867,7 @@ namespace FFS.Libraries.StaticEcs {
                     HeuristicChunks[chunkIdx].NotEmptyBlocks.SetBit(chunkBlockIdx);
                 }
 
-                if (_queriesToUpdateOnAddCount == 0) {
-                    entitiesMask |= entitiesMaskFilter;
-                }
-                else if (entitiesMaskFilter == ulong.MaxValue) {
-                    entitiesMask = ulong.MaxValue;
-                    for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                        _queriesToUpdateOnAdd[i].BatchUpdate(segmentIdx, segmentBlockIdx);
-                    }
-                }
-                else {
-                    var starts = entitiesMaskFilter & ~(entitiesMaskFilter << 1);
-                    var ends = entitiesMaskFilter & ~(entitiesMaskFilter >> 1);
-                    do {
-                        #if NET6_0_OR_GREATER
-                        var start = (byte)System.Numerics.BitOperations.TrailingZeroCount(starts);
-                        var endIncluded = (byte)System.Numerics.BitOperations.TrailingZeroCount(ends);
-                        #else
-                        var start = deBruijn[(uint)(((starts & (ulong)-(long)starts) * 0x37E84A99DAE458FUL) >> 58)];
-                        var endIncluded = deBruijn[(uint)(((ends & (ulong)-(long)ends) * 0x37E84A99DAE458FUL) >> 58)];
-                        #endif
-                        starts &= starts - 1UL;
-                        ends &= ends - 1UL;
-
-                        var runMask = ((2UL << (endIncluded - start)) - 1) << start;
-                        entitiesMask |= runMask;
-
-                        var invertedRunMask = ~runMask;
-                        for (uint i = 0; i < _queriesToUpdateOnAddCount; i++) {
-                            _queriesToUpdateOnAdd[i].Update(invertedRunMask, segmentIdx, segmentBlockIdx);
-                        }
-                    } while (starts != 0);
-                }
+                entitiesMask |= entitiesMaskFilter;
 
                 if (entitiesMask == ulong.MaxValue) {
                     HeuristicChunks[chunkIdx].FullBlocks.SetBit(chunkBlockIdx);
@@ -2152,11 +1876,6 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             internal void BatchDeleteTag(ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx) {
-                #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
-                #endif
-
                 var baseGlobalBlockEntityIdx = (uint)((segmentIdx << Const.ENTITIES_IN_SEGMENT_SHIFT) + (segmentBlockIdx << Const.ENTITIES_IN_BLOCK_SHIFT));
                 var chunkBlockIdx = (byte)((baseGlobalBlockEntityIdx >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_CHUNK_MASK);
                 var chunkIdx = baseGlobalBlockEntityIdx >> Const.ENTITIES_IN_CHUNK_SHIFT;
@@ -2179,43 +1898,8 @@ namespace FFS.Libraries.StaticEcs {
                 if (entitiesMask == ulong.MaxValue) {
                     HeuristicChunks[chunkIdx].FullBlocks.ClearBit(chunkBlockIdx);
                 }
-
-                if (_queriesToUpdateOnDeleteCount == 0) {
-                    entitiesMask &= ~entitiesMaskFilter;
-                }
-                else if (entitiesMaskFilter == ulong.MaxValue) {
-                    entitiesMask = 0;
-                    for (uint i = 0; i < _queriesToUpdateOnDeleteCount; i++) {
-                        _queriesToUpdateOnDelete[i].BatchUpdate(segmentIdx, segmentBlockIdx);
-                    }
-                }
-                else {
-                    #if !NET6_0_OR_GREATER
-                    var deBruijn = Utils.DeBruijn;
-                    #endif
-
-                    var starts = entitiesMaskFilter & ~(entitiesMaskFilter << 1);
-                    var ends = entitiesMaskFilter & ~(entitiesMaskFilter >> 1);
-                    do {
-                        #if NET6_0_OR_GREATER
-                        var start = (byte)System.Numerics.BitOperations.TrailingZeroCount(starts);
-                        var endIncluded = (byte)System.Numerics.BitOperations.TrailingZeroCount(ends);
-                        #else
-                        var start = deBruijn[(uint)(((starts & (ulong)-(long)starts) * 0x37E84A99DAE458FUL) >> 58)];
-                        var endIncluded = deBruijn[(uint)(((ends & (ulong)-(long)ends) * 0x37E84A99DAE458FUL) >> 58)];
-                        #endif
-                        starts &= starts - 1UL;
-                        ends &= ends - 1UL;
-
-                        var runMask = ((2UL << (endIncluded - start)) - 1) << start;
-                        entitiesMask &= ~runMask;
-
-                        var invertedRunMask = ~runMask;
-                        for (uint i = 0; i < _queriesToUpdateOnDeleteCount; i++) {
-                            _queriesToUpdateOnDelete[i].Update(invertedRunMask, segmentIdx, segmentBlockIdx);
-                        }
-                    } while (starts != 0);
-                }
+                
+                entitiesMask &= ~entitiesMaskFilter;
 
                 if (entitiesMask == 0) {
                     var notEmptyBlocks = HeuristicChunks[chunkIdx].NotEmptyBlocks.ClearBit(chunkBlockIdx);
@@ -2237,8 +1921,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal void BatchToggle(ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertMultiThreadNotActive(ComponentsTypeName);
                 #endif
 
@@ -2296,14 +1978,6 @@ namespace FFS.Libraries.StaticEcs {
 
                 _segmentsMaskCache = Const.DataMasks;
                 _segmentsPoolCount = 0;
-                _queriesToUpdateOnDeleteCount = 0;
-                _queriesToUpdateOnAddCount = 0;
-                _queriesToUpdateOnDisableCount = 0;
-                _queriesToUpdateOnEnableCount = 0;
-                _queriesToUpdateOnDelete = new QueryData[Const.MAX_QUERY_DATA_PER_TYPE];
-                _queriesToUpdateOnAdd = new QueryData[Const.MAX_QUERY_DATA_PER_TYPE];
-                _queriesToUpdateOnDisable = isTag ? null : new QueryData[Const.MAX_QUERY_DATA_PER_TYPE];
-                _queriesToUpdateOnEnable = isTag ? null : new QueryData[Const.MAX_QUERY_DATA_PER_TYPE];
                 if (isTag) {
                     HasOnAdd = false;
                     HasOnDelete = false;
@@ -2328,21 +2002,39 @@ namespace FFS.Libraries.StaticEcs {
                     }
                 }
                 Unmanaged = isTag || !RuntimeHelpers.IsReferenceOrContainsReferences<T>();
+                UnmanagedSize = !isTag && Unmanaged ? Unsafe.SizeOf<T>() : 0;
                 DataLifecycle = !isTag && !config.NoDataLifecycle.Value;
                 DefaultValue = config.DefaultValue ?? default;
                 HasDefaultValue = config.DefaultValue.HasValue;
 
-                TrackAdded = config.TrackAdded.Value;
-                TrackDeleted = config.TrackDeleted.Value;
-                #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                TrackChanged = !isTag && config.TrackChanged.Value;
+                var probe = default(T);
+                TrackAdded = probe is ITrackableAdded;
+                TrackDeleted = probe is ITrackableDeleted;
+                HasDisable = !isTag && probe is IDisableable;
+                #if FFS_ECS_DEBUG
+                IsInternal = !isTag && probe is IComponentInternal;
                 #endif
-                TrackAddedOrChanged = config.TrackAdded.Value
+                SegmentMaskLen = (byte)(HasDisable ? Const.BLOCKS_IN_SEGMENT * 2 : Const.BLOCKS_IN_SEGMENT);
+                #if !FFS_ECS_DISABLE_CHANGED_TRACKING
+                TrackChanged = !isTag && probe is ITrackableChanged;
+                #endif
+                TrackAddedOrChanged = TrackAdded
                     #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                    || (!isTag && config.TrackChanged.Value)
+                    || TrackChanged
                     #endif
                 ;
-                DeletedTrackingOffset = (byte)(isTag ? Const.BLOCKS_IN_SEGMENT : Const.BLOCKS_IN_SEGMENT * 2);
+                {
+                    byte trackingOff = 0;
+                    #if !FFS_ECS_DISABLE_CHANGED_TRACKING
+                    if (TrackChanged) trackingOff += Const.BLOCKS_IN_SEGMENT;
+                    #endif
+                    AddedTrackingOffset = trackingOff;
+                    if (TrackAdded) trackingOff += Const.BLOCKS_IN_SEGMENT;
+                    DeletedTrackingOffset = trackingOff;
+                    if (TrackDeleted) trackingOff += Const.BLOCKS_IN_SEGMENT;
+                    TrackingBlocksCount = trackingOff;
+                    AnyTracking = trackingOff > 0;
+                }
 
                 IsRegistered = true;
                 #if FFS_ECS_DEBUG
@@ -2408,11 +2100,7 @@ namespace FFS.Libraries.StaticEcs {
                     _componentsPool = new T[segmentsCapacity][];
                 }
 
-                if (TrackAdded || TrackDeleted
-                    #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                    || TrackChanged
-                    #endif
-                ) {
+                if (AnyTracking) {
                     var bufferSize = Data.Instance.TrackingBufferSize;
                     var totalSlots = (uint)bufferSize + 1;
                     var poolSize = bufferSize > 0 ? segmentsCapacity * totalSlots : segmentsCapacity;
@@ -2455,16 +2143,12 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(NoInlining)]
             internal void HardResetInternal() {
                 var segCount = EntitiesMaskSegments.Length;
-                var hasTracking = TrackAdded || TrackDeleted
-                    #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                    || TrackChanged
-                    #endif
-                    ;
+                var hasTracking = AnyTracking;
 
                 for (var i = 0; i < segCount; i++) {
                     ref var masks = ref EntitiesMaskSegments[i];
                     if (masks != null) {
-                        Array.Clear(masks, 0, IsTag ? Const.BLOCKS_IN_SEGMENT : Const.BLOCKS_IN_SEGMENT << 1);
+                        Array.Clear(masks, 0, SegmentMaskLen);
                         
                         if (!IsTag) {
                             ref var components = ref ComponentSegments[i];
@@ -2541,11 +2225,7 @@ namespace FFS.Libraries.StaticEcs {
                     Array.Resize(ref _componentsPool, (int)segmentsCapacity);
                 }
 
-                if (TrackAdded || TrackDeleted
-                    #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                    || TrackChanged
-                    #endif
-                ) {
+                if (AnyTracking) {
                     var bufferSize = Data.Instance.TrackingBufferSize;
                     var totalSlots = (uint)bufferSize + 1;
                     var poolSize = bufferSize > 0 ? segmentsCapacity * totalSlots : segmentsCapacity;
@@ -2593,8 +2273,6 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly bool TryGet(Entity entity, out T value) {
                 #if FFS_ECS_DEBUG
-                AssertWorldIsInitialized(ComponentsTypeName);
-                AssertRegisteredComponent<T>(ComponentsTypeName);
                 AssertEntityIsNotDestroyedAndLoaded(ComponentsTypeName, entity);
                 #endif
 
@@ -2618,7 +2296,7 @@ namespace FFS.Libraries.StaticEcs {
             private void SetAddedBit(uint entityId, uint segmentIdx, byte segmentBlockIdx, ulong blockEntityMask) {
                 ref var seg = ref TrackingMaskSegments[segmentIdx];
                 seg ??= AllocateTrackingSegment(segmentIdx);
-                seg[segmentBlockIdx] |= blockEntityMask;
+                seg[segmentBlockIdx + AddedTrackingOffset] |= blockEntityMask;
                 var chunkBlockIdx = (byte)((entityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_CHUNK_MASK);
                 TrackingHeuristicChunks[entityId >> Const.ENTITIES_IN_CHUNK_SHIFT].AddedBlocks.SetBit(chunkBlockIdx);
             }
@@ -2639,12 +2317,12 @@ namespace FFS.Libraries.StaticEcs {
                 var chunkBlockIdx = (byte)((entityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_CHUNK_MASK);
                 ref var heuristic = ref TrackingHeuristicChunks[entityId >> Const.ENTITIES_IN_CHUNK_SHIFT];
                 if (TrackAdded) {
-                    seg[segmentBlockIdx] |= blockEntityMask;
+                    seg[segmentBlockIdx + AddedTrackingOffset] |= blockEntityMask;
                     heuristic.AddedBlocks.SetBit(chunkBlockIdx);
                 }
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
                 if (TrackChanged) {
-                    seg[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] |= blockEntityMask;
+                    seg[segmentBlockIdx] |= blockEntityMask;
                     heuristic.ChangedBlocks.SetBit(chunkBlockIdx);
                 }
                 #endif
@@ -2656,12 +2334,12 @@ namespace FFS.Libraries.StaticEcs {
                 seg ??= AllocateTrackingSegment(segmentIdx);
                 ref var heuristic = ref TrackingHeuristicChunks[chunkIdx];
                 if (TrackAdded) {
-                    seg[segmentBlockIdx] |= entitiesMaskFilter;
+                    seg[segmentBlockIdx + AddedTrackingOffset] |= entitiesMaskFilter;
                     heuristic.AddedBlocks.SetBit(chunkBlockIdx);
                 }
                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
                 if (TrackChanged) {
-                    seg[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] |= entitiesMaskFilter;
+                    seg[segmentBlockIdx] |= entitiesMaskFilter;
                     heuristic.ChangedBlocks.SetBit(chunkBlockIdx);
                 }
                 #endif
@@ -2671,7 +2349,7 @@ namespace FFS.Libraries.StaticEcs {
             private void SetAddedBitBatch(ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx, byte chunkBlockIdx, uint chunkIdx) {
                 ref var seg = ref TrackingMaskSegments[segmentIdx];
                 seg ??= AllocateTrackingSegment(segmentIdx);
-                seg[segmentBlockIdx] |= entitiesMaskFilter;
+                seg[segmentBlockIdx + AddedTrackingOffset] |= entitiesMaskFilter;
                 TrackingHeuristicChunks[chunkIdx].AddedBlocks.SetBit(chunkBlockIdx);
             }
 
@@ -2688,7 +2366,7 @@ namespace FFS.Libraries.StaticEcs {
             internal void SetChangedBit(uint entityId, uint segmentIdx, byte segmentBlockIdx, ulong blockEntityMask) {
                 ref var seg = ref TrackingMaskSegments[segmentIdx];
                 seg ??= AllocateTrackingSegment(segmentIdx);
-                seg[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] |= blockEntityMask;
+                seg[segmentBlockIdx] |= blockEntityMask;
                 var chunkBlockIdx = (byte)((entityId >> Const.ENTITIES_IN_BLOCK_SHIFT) & Const.BLOCKS_IN_CHUNK_MASK);
                 TrackingHeuristicChunks[entityId >> Const.ENTITIES_IN_CHUNK_SHIFT].ChangedBlocks.SetBit(chunkBlockIdx);
             }
@@ -2697,7 +2375,7 @@ namespace FFS.Libraries.StaticEcs {
             internal void SetChangedBitBatch(ulong entitiesMaskFilter, uint segmentIdx, byte segmentBlockIdx, byte chunkBlockIdx, uint chunkIdx) {
                 ref var seg = ref TrackingMaskSegments[segmentIdx];
                 seg ??= AllocateTrackingSegment(segmentIdx);
-                seg[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] |= entitiesMaskFilter;
+                seg[segmentBlockIdx] |= entitiesMaskFilter;
                 TrackingHeuristicChunks[chunkIdx].ChangedBlocks.SetBit(chunkBlockIdx);
             }
             #endif
@@ -2705,7 +2383,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(NoInlining)]
             // ReSharper disable once UnusedParameter.Local
             private ulong[] AllocateTrackingSegment(uint segmentIdx) {
-                var trackingBlocksCount = IsTag ? Const.BLOCKS_IN_SEGMENT * 2 : Const.BLOCKS_IN_SEGMENT * 3;
+                var trackingBlocksCount = TrackingBlocksCount;
                 var poolIdx = Interlocked.Decrement(ref _trackingSegmentsPoolCount);
                 if (poolIdx >= 0) {
                     var seg = _trackingSegmentsPool[poolIdx];
@@ -2737,12 +2415,7 @@ namespace FFS.Libraries.StaticEcs {
             internal void AdvanceTrackingSlot() {
                 var bufferSize = Data.Instance.TrackingBufferSize;
                 if (bufferSize == 0) return;
-                var hasTracking = TrackAdded || TrackDeleted
-                    #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                    || TrackChanged
-                    #endif
-                    ;
-                if (!hasTracking) return;
+                if (!AnyTracking) return;
 
                 var newSlot = (int)((Data.Instance.CurrentTick + 1) % (uint)(bufferSize + 1));
                 var heuristic = TrackingHistoryHeuristic[newSlot];
@@ -2786,6 +2459,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong AddedHeuristicHistory(ulong fromTick, ulong toTick, byte bufferSize, uint chunkIdx) {
                 #if FFS_ECS_DEBUG
+                AssertComponentTrackAdded<T>(ComponentsTypeName);
                 AssertTrackingBufferNotOverflow(ComponentsTypeName, fromTick, toTick, bufferSize);
                 #endif
                 var ticksToCheck = toTick - fromTick;
@@ -2805,6 +2479,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong DeletedHeuristicHistory(ulong fromTick, ulong toTick, byte bufferSize, uint chunkIdx) {
                 #if FFS_ECS_DEBUG
+                AssertComponentTrackDeleted<T>(ComponentsTypeName);
                 AssertTrackingBufferNotOverflow(ComponentsTypeName, fromTick, toTick, bufferSize);
                 #endif
                 var ticksToCheck = toTick - fromTick;
@@ -2825,6 +2500,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong ChangedHeuristicHistory(ulong fromTick, ulong toTick, byte bufferSize, uint chunkIdx) {
                 #if FFS_ECS_DEBUG
+                AssertComponentTrackChanged<T>(ComponentsTypeName);
                 AssertTrackingBufferNotOverflow(ComponentsTypeName, fromTick, toTick, bufferSize);
                 #endif
                 var ticksToCheck = toTick - fromTick;
@@ -2845,6 +2521,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong AddedMaskHistory(ulong fromTick, ulong toTick, byte bufferSize, uint segmentIdx, int segmentBlockIdx) {
                 #if FFS_ECS_DEBUG
+                AssertComponentTrackAdded<T>(ComponentsTypeName);
                 AssertTrackingBufferNotOverflow(ComponentsTypeName, fromTick, toTick, bufferSize);
                 #endif
                 var ticksToCheck = toTick - fromTick;
@@ -2853,12 +2530,12 @@ namespace FFS.Libraries.StaticEcs {
                 var totalSlots = (ulong)bufferSize + 1;
                 if (ticksToCheck == 1) {
                     var m = TrackingHistoryMasks[(int)(toTick % totalSlots)][segmentIdx];
-                    return m != null ? m[segmentBlockIdx] : 0UL;
+                    return m != null ? m[segmentBlockIdx + AddedTrackingOffset] : 0UL;
                 }
                 ulong result = 0;
                 for (ulong i = 0; i < ticksToCheck; i++) {
                     var m = TrackingHistoryMasks[(int)((toTick - i) % totalSlots)][segmentIdx];
-                    if (m != null) result |= m[segmentBlockIdx];
+                    if (m != null) result |= m[segmentBlockIdx + AddedTrackingOffset];
                 }
                 return result;
             }
@@ -2866,6 +2543,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong DeletedMaskHistory(ulong fromTick, ulong toTick, byte bufferSize, uint segmentIdx, int segmentBlockIdx) {
                 #if FFS_ECS_DEBUG
+                AssertComponentTrackDeleted<T>(ComponentsTypeName);
                 AssertTrackingBufferNotOverflow(ComponentsTypeName, fromTick, toTick, bufferSize);
                 #endif
                 var ticksToCheck = toTick - fromTick;
@@ -2888,6 +2566,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong ChangedMaskHistory(ulong fromTick, ulong toTick, byte bufferSize, uint segmentIdx, int segmentBlockIdx) {
                 #if FFS_ECS_DEBUG
+                AssertComponentTrackChanged<T>(ComponentsTypeName);
                 AssertTrackingBufferNotOverflow(ComponentsTypeName, fromTick, toTick, bufferSize);
                 #endif
                 var ticksToCheck = toTick - fromTick;
@@ -2896,12 +2575,12 @@ namespace FFS.Libraries.StaticEcs {
                 var totalSlots = (ulong)bufferSize + 1;
                 if (ticksToCheck == 1) {
                     var m = TrackingHistoryMasks[(int)(toTick % totalSlots)][segmentIdx];
-                    return m != null ? m[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] : 0UL;
+                    return m != null ? m[segmentBlockIdx] : 0UL;
                 }
                 ulong result = 0;
                 for (ulong i = 0; i < ticksToCheck; i++) {
                     var m = TrackingHistoryMasks[(int)((toTick - i) % totalSlots)][segmentIdx];
-                    if (m != null) result |= m[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT];
+                    if (m != null) result |= m[segmentBlockIdx];
                 }
                 return result;
             }
@@ -2950,7 +2629,7 @@ namespace FFS.Libraries.StaticEcs {
                         var segmentIdx = (uint)(baseSegment + segmentOffset);
                         ref var segRef = ref maskSegments[segmentIdx];
                         if (segRef != null) {
-                            Array.Clear(segRef, 0, Const.BLOCKS_IN_SEGMENT);
+                            Array.Clear(segRef, AddedTrackingOffset, Const.BLOCKS_IN_SEGMENT);
                             var segmentMask = 0xFUL << (segmentOffset << Const.BLOCKS_IN_SEGMENT_SHIFT);
                             if ((heuristic.DeletedBlocks.Value & segmentMask) == 0
                                 #if !FFS_ECS_DISABLE_CHANGED_TRACKING
@@ -3064,7 +2743,7 @@ namespace FFS.Libraries.StaticEcs {
                         var segmentIdx = (uint)(baseSegment + segmentOffset);
                         ref var segRef = ref maskSegments[segmentIdx];
                         if (segRef != null) {
-                            Array.Clear(segRef, Const.BLOCKS_IN_SEGMENT, Const.BLOCKS_IN_SEGMENT);
+                            Array.Clear(segRef, 0, Const.BLOCKS_IN_SEGMENT);
                             var segmentMask = 0xFUL << (segmentOffset << Const.BLOCKS_IN_SEGMENT_SHIFT);
                             if ((heuristic.AddedBlocks.Value & segmentMask) == 0
                                 && (heuristic.DeletedBlocks.Value & segmentMask) == 0) {
@@ -3088,11 +2767,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertMultiThreadNotActive(ComponentsTypeName);
                 #endif
-                if (!TrackAdded && !TrackDeleted
-                    #if !FFS_ECS_DISABLE_CHANGED_TRACKING
-                    && !TrackChanged
-                    #endif
-                ) return;
+                if (!AnyTracking) return;
                 var bufferSize = Data.Instance.TrackingBufferSize;
                 if (bufferSize > 0) {
                     for (var slot = 0; slot < bufferSize + 1; slot++) {
@@ -3163,16 +2838,14 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 Interlocked.Increment(ref _segmentsPoolCount);
-                var size = Const.BLOCKS_IN_SEGMENT;
                 if (!IsTag) {
-                    size <<= 1;
                     comps = new T[Const.ENTITIES_IN_SEGMENT];
                     if (HasDefaultValue && DataLifecycle) {
                         comps.AsSpan().Fill(DefaultValue);
                     }
                 }
-                
-                masks = new ulong[size];
+
+                masks = new ulong[SegmentMaskLen];
 
                 #if FFS_ECS_BURST
                 LifecycleHandle.OnSegmentCreated(segmentIdx, masks, comps, false);
@@ -3202,35 +2875,68 @@ namespace FFS.Libraries.StaticEcs {
             internal readonly ulong EnabledMask(uint segmentIdx, int segmentBlockIdx) {
                 var masks = EntitiesMaskSegments[segmentIdx];
                 if (masks == null) return 0UL;
-                return IsTag 
-                    ? masks[segmentBlockIdx] 
-                    : masks[segmentBlockIdx] & ~masks[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT];
+                return HasDisable
+                    ? masks[segmentBlockIdx] & ~masks[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT]
+                    : masks[segmentBlockIdx];
             }
 
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong DisabledMask(uint segmentIdx, int segmentBlockIdx) {
-                if (IsTag) return 0UL;
+                if (!HasDisable) return 0UL;
                 var masks = EntitiesMaskSegments[segmentIdx];
                 return masks != null ? masks[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] : 0UL;
             }
 
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong AddedMask(uint segmentIdx, int segmentBlockIdx) {
+                #if FFS_ECS_DEBUG
+                AssertComponentTrackAdded<T>(ComponentsTypeName);
+                #endif
                 var masks = TrackingMaskSegments[segmentIdx];
-                return masks != null ? masks[segmentBlockIdx] : 0UL;
+                return masks != null ? masks[segmentBlockIdx + AddedTrackingOffset] : 0UL;
+            }
+            
+            [MethodImpl(AggressiveInlining)]
+            internal readonly ulong AddedChunkMask(uint chunkIdx) {
+                #if FFS_ECS_DEBUG
+                AssertComponentTrackAdded<T>(ComponentsTypeName);
+                #endif
+                return TrackingHeuristicChunks[chunkIdx].AddedBlocks.Value;
             }
 
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong DeletedMask(uint segmentIdx, int segmentBlockIdx) {
+                #if FFS_ECS_DEBUG
+                AssertComponentTrackDeleted<T>(ComponentsTypeName);
+                #endif
                 var masks = TrackingMaskSegments[segmentIdx];
                 return masks != null ? masks[segmentBlockIdx + DeletedTrackingOffset] : 0UL;
+            }
+            
+            [MethodImpl(AggressiveInlining)]
+            internal readonly ulong DeletedChunkMask(uint chunkIdx) {
+                #if FFS_ECS_DEBUG
+                AssertComponentTrackDeleted<T>(ComponentsTypeName);
+                #endif
+                return TrackingHeuristicChunks[chunkIdx].DeletedBlocks.Value;
             }
 
             #if !FFS_ECS_DISABLE_CHANGED_TRACKING
             [MethodImpl(AggressiveInlining)]
             internal readonly ulong ChangedMask(uint segmentIdx, int segmentBlockIdx) {
+                #if FFS_ECS_DEBUG
+                AssertComponentTrackChanged<T>(ComponentsTypeName);
+                #endif
                 var masks = TrackingMaskSegments[segmentIdx];
-                return masks != null ? masks[segmentBlockIdx + Const.BLOCKS_IN_SEGMENT] : 0UL;
+                return masks != null ? masks[segmentBlockIdx] : 0UL;
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            internal readonly ulong ChangedChunkMask(uint chunkIdx) {
+                #if FFS_ECS_DEBUG
+                AssertComponentTrackChanged<T>(ComponentsTypeName);
+                #endif
+                return TrackingHeuristicChunks[chunkIdx].ChangedBlocks.Value;
             }
             #endif
 
@@ -3238,73 +2944,6 @@ namespace FFS.Libraries.StaticEcs {
             internal readonly ulong AnyMask(uint segmentIdx, int segmentBlockIdx) {
                 var masks = EntitiesMaskSegments[segmentIdx];
                 return masks != null ? masks[segmentBlockIdx] : 0UL;
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            internal void PushQueryDataForDelete(QueryData queryData) {
-                _queriesToUpdateOnDelete[_queriesToUpdateOnDeleteCount++] = queryData;
-            }
-
-            internal void PopQueryDataForDelete() {
-                _queriesToUpdateOnDelete[--_queriesToUpdateOnDeleteCount] = default;
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            internal void PushQueryDataForDeleteDisable(QueryData queryData) {
-                _queriesToUpdateOnDelete[_queriesToUpdateOnDeleteCount++] = queryData;
-                if (!IsTag) {
-                    _queriesToUpdateOnDisable[_queriesToUpdateOnDisableCount++] = queryData;
-                }
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            internal void PopQueryDataForDeleteDisable() {
-                _queriesToUpdateOnDelete[--_queriesToUpdateOnDeleteCount] = default;
-                if (!IsTag) {
-                    _queriesToUpdateOnDisable[--_queriesToUpdateOnDisableCount] = default;
-                }
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            internal void PushQueryDataForDeleteEnable(QueryData queryData) {
-                _queriesToUpdateOnDelete[_queriesToUpdateOnDeleteCount++] = queryData;
-                if (!IsTag) {
-                    _queriesToUpdateOnEnable[_queriesToUpdateOnEnableCount++] = queryData;
-                }
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            internal void PopQueryDataForDeleteEnable() {
-                _queriesToUpdateOnDelete[--_queriesToUpdateOnDeleteCount] = default;
-                if (!IsTag) {
-                    _queriesToUpdateOnEnable[--_queriesToUpdateOnEnableCount] = default;
-                }
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            internal void PushQueryDataForAdd(QueryData queryData) {
-                _queriesToUpdateOnAdd[_queriesToUpdateOnAddCount++] = queryData;
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            internal void PopQueryDataForAdd() {
-                _queriesToUpdateOnAdd[--_queriesToUpdateOnAddCount] = default;
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            internal void PushQueryDataForAddEnable(QueryData queryData) {
-                _queriesToUpdateOnAdd[_queriesToUpdateOnAddCount++] = queryData;
-                if (!IsTag) {
-                    _queriesToUpdateOnEnable[_queriesToUpdateOnEnableCount++] = queryData;
-                }
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            internal void PopQueryDataForAddEnable() {
-                _queriesToUpdateOnAdd[--_queriesToUpdateOnAddCount] = default;
-                if (!IsTag) {
-                    _queriesToUpdateOnEnable[--_queriesToUpdateOnEnableCount] = default;
-                }
             }
             
             #if FFS_ECS_DEBUG
@@ -3340,9 +2979,10 @@ namespace FFS.Libraries.StaticEcs {
 
             #region SERIALIZATION
             [MethodImpl(AggressiveInlining)]
-            internal void WriteChunk(ref BinaryPackWriter writer, uint chunkIdx) {
+            internal void WriteChunk(ref BinaryPackWriter writer, uint chunkIdx, bool withTracking) {
                 writer.WriteBool(IsTag);
-                
+                writer.WriteBool(HasDisable);
+
                 ref var heuristic = ref HeuristicChunks[chunkIdx];
                 var notEmptyBlocks = heuristic.NotEmptyBlocks.Value;
                 writer.WriteUlong(notEmptyBlocks);
@@ -3396,7 +3036,9 @@ namespace FFS.Libraries.StaticEcs {
                             var entitiesMask = masks![blockIdx];
 
                             writer.WriteUlong(entitiesMask);
-                            writer.WriteUlong(masks![blockIdx + Const.BLOCKS_IN_SEGMENT]);
+                            if (HasDisable) {
+                                writer.WriteUlong(masks[blockIdx + Const.BLOCKS_IN_SEGMENT]);
+                            }
 
                             var chunkBlockEntityId = (uint)((segmentIdx << Const.ENTITIES_IN_SEGMENT_SHIFT) +
                                                             (blockIdx << Const.ENTITIES_IN_BLOCK_SHIFT));
@@ -3444,6 +3086,39 @@ namespace FFS.Libraries.StaticEcs {
                         }
                     }
                 }
+
+                writer.WriteByte(TrackingBlocksCount);
+                var hasTracking = withTracking && AnyTracking;
+                writer.WriteBool(hasTracking);
+                if (hasTracking) {
+                    var bufferSize = Data.Instance.TrackingBufferSize;
+                    var totalSlots = bufferSize + 1;
+                    var baseSegment = chunkIdx << Const.SEGMENTS_IN_CHUNK_SHIFT;
+                    for (var slot = 0; slot < totalSlots; slot++) {
+                        HeuristicComponentsTracking[] heuristicArr;
+                        ulong[][] masksArr;
+                        if (bufferSize == 0) {
+                            heuristicArr = TrackingHeuristicChunks;
+                            masksArr = TrackingMaskSegments;
+                        } else {
+                            heuristicArr = TrackingHistoryHeuristic[slot];
+                            masksArr = TrackingHistoryMasks[slot];
+                        }
+                        ref var h = ref heuristicArr[chunkIdx];
+                        #if !FFS_ECS_DISABLE_CHANGED_TRACKING
+                        if (TrackChanged) writer.WriteUlong(h.ChangedBlocks.Value);
+                        #endif
+                        if (TrackAdded) writer.WriteUlong(h.AddedBlocks.Value);
+                        if (TrackDeleted) writer.WriteUlong(h.DeletedBlocks.Value);
+                        for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
+                            var seg = masksArr[baseSegment + s];
+                            writer.WriteBool(seg != null);
+                            if (seg != null) {
+                                writer.WriteArrayUnmanaged(seg, 0, TrackingBlocksCount);
+                            }
+                        }
+                    }
+                }
             }
 
             [MethodImpl(AggressiveInlining)]
@@ -3452,7 +3127,8 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 if (isTag != IsTag) throw new StaticEcsException($"isTag != IsTag");
                 #endif
-                
+                var hadDisable = reader.ReadBool();
+
                 ref var heuristic = ref HeuristicChunks[chunkIdx];
                 var notEmptyBlocks = reader.ReadUlong();
                 heuristic.NotEmptyBlocks.Value = notEmptyBlocks;
@@ -3511,9 +3187,14 @@ namespace FFS.Libraries.StaticEcs {
                             }
 
                             var entitiesMask = reader.ReadUlong();
-                            var disabledEntitiesMask = reader.ReadUlong();
+                            ulong disabledEntitiesMask = 0;
+                            if (hadDisable) {
+                                disabledEntitiesMask = reader.ReadUlong();
+                            }
                             masks![blockIdx] = entitiesMask;
-                            masks[blockIdx + Const.BLOCKS_IN_SEGMENT] = disabledEntitiesMask;
+                            if (HasDisable) {
+                                masks[blockIdx + Const.BLOCKS_IN_SEGMENT] = disabledEntitiesMask;
+                            }
 
                             var chunkBlockEntityId = (uint)((segmentIdx << Const.ENTITIES_IN_SEGMENT_SHIFT) +
                                                             (blockIdx << Const.ENTITIES_IN_BLOCK_SHIFT));
@@ -3578,31 +3259,79 @@ namespace FFS.Libraries.StaticEcs {
                         }
                     }
                 }
+
+                var savedBlocksCount = reader.ReadByte();
+                if (savedBlocksCount != TrackingBlocksCount) {
+                    throw new StaticEcsException($"World<{typeof(TWorld)}>.Components<{typeof(T)}>", "ReadChunk",
+                        $"Tracking layout mismatch: saved TrackingBlocksCount={savedBlocksCount}, current={TrackingBlocksCount}. " +
+                        $"Either FFS_ECS_DISABLE_CHANGED_TRACKING differs between save and load, or the set of ITrackable* markers on the type has changed.");
+                }
+                var hasTracking = reader.ReadBool();
+                if (hasTracking) {
+                    var bufferSize = Data.Instance.TrackingBufferSize;
+                    var totalSlots = bufferSize + 1;
+                    var baseSegment = chunkIdx << Const.SEGMENTS_IN_CHUNK_SHIFT;
+                    for (var slot = 0; slot < totalSlots; slot++) {
+                        HeuristicComponentsTracking[] heuristicArr;
+                        ulong[][] masksArr;
+                        if (bufferSize == 0) {
+                            heuristicArr = TrackingHeuristicChunks;
+                            masksArr = TrackingMaskSegments;
+                        } else {
+                            heuristicArr = TrackingHistoryHeuristic[slot];
+                            masksArr = TrackingHistoryMasks[slot];
+                        }
+                        ref var h = ref heuristicArr[chunkIdx];
+                        #if !FFS_ECS_DISABLE_CHANGED_TRACKING
+                        if (TrackChanged) h.ChangedBlocks.Value = reader.ReadUlong();
+                        #endif
+                        if (TrackAdded) h.AddedBlocks.Value = reader.ReadUlong();
+                        if (TrackDeleted) h.DeletedBlocks.Value = reader.ReadUlong();
+                        for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
+                            var present = reader.ReadBool();
+                            if (!present) continue;
+                            var segmentIdx = (uint)(baseSegment + s);
+                            ref var segRef = ref masksArr[segmentIdx];
+                            segRef ??= AllocateTrackingSegment(segmentIdx);
+                            reader.ReadArrayUnmanaged(ref segRef, 0);
+                        }
+                    }
+                    if (bufferSize > 0) {
+                        var writeSlot = (int)((Data.Instance.CurrentTick + 1) % (ulong)totalSlots);
+                        TrackingHeuristicChunks = TrackingHistoryHeuristic[writeSlot];
+                        TrackingMaskSegments = TrackingHistoryMasks[writeSlot];
+                    }
+                }
             }
 
             [MethodImpl(AggressiveInlining)]
             internal bool WriteEntity(ref BinaryPackWriter writer, Entity entity, bool deleteComponent) {
-                #if FFS_ECS_DEBUG
-                if (!IsTag && !HasWrite) throw new StaticEcsException($"Method Write not implemented for component type {typeof(T)}");
-                #endif
                 if (!Has(entity)) {
                     return false;
                 }
-                
+
                 writer.WriteBool(IsTag);
                 if (IsTag) {
                     return true;
                 }
-                
+
                 var offset = writer.MakePoint(sizeof(ushort));
                 writer.WriteByte(Version);
-                Ref(entity).Write(ref writer, entity);
+                if (HasWrite) {
+                    Ref(entity).Write(ref writer, entity);
+                } else if (Unmanaged) {
+                    WriteUnmanagedRef(ref writer, ref Ref(entity));
+                }
+                #if FFS_ECS_DEBUG
+                else {
+                    throw new StaticEcsException($"Method Write not implemented for managed component type {typeof(T)}");
+                }
+                #endif
                 var size = writer.Position - (offset + sizeof(short));
                 #if FFS_ECS_DEBUG
                 if (size > short.MaxValue) throw new StaticEcsException($"Size of component {typeof(T)} more than {short.MaxValue} bytes");
                 #endif
-                var disabled = HasDisabled(entity);
-                if (disabled) {
+                if (HasDisable && HasDisabled(entity)) {
                     writer.WriteUshortAt(offset, (ushort)(size | ComponentSerializerUtils.DisabledBit));
                 }
                 else {
@@ -3618,10 +3347,6 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             internal void ReadEntity(ref BinaryPackReader reader, Entity entity) {
-                #if FFS_ECS_DEBUG
-                if (!IsTag && !HasRead) throw new StaticEcsException($"Method Read not implemented for component type {typeof(T)}");
-                #endif
-
                 _ = reader.ReadBool(); // isTag
                 if (IsTag) {
                     Set(entity);
@@ -3632,18 +3357,51 @@ namespace FFS.Libraries.StaticEcs {
                 var oldVersion = reader.ReadByte();
 
                 var component = default(T);
-                component.Read(ref reader, entity, oldVersion, disabled);
+                if (HasRead) {
+                    component.Read(ref reader, entity, oldVersion, disabled);
+                } else if (Unmanaged && oldVersion == Version) {
+                    ReadUnmanagedRef(ref reader, ref component);
+                }
+                #if FFS_ECS_DEBUG
+                else {
+                    throw new StaticEcsException(
+                        Unmanaged
+                            ? $"Method Read not implemented for unmanaged component type {typeof(T)} and saved version {oldVersion} differs from current {Version}"
+                            : $"Method Read not implemented for managed component type {typeof(T)}");
+                }
+                #endif
                 Set(entity, component, false);
 
-                if (disabled) {
+                if (HasDisable && disabled) {
                     Disable(entity);
                 }
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private void WriteUnmanagedRef(ref BinaryPackWriter writer, ref T value) {
+                var size = (uint)UnmanagedSize;
+                writer.EnsureSize(size);
+                Unsafe.WriteUnaligned(ref writer.Buffer[writer.Position], value);
+                writer.Position += size;
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private void ReadUnmanagedRef(ref BinaryPackReader reader, ref T value) {
+                var size = (uint)UnmanagedSize;
+                value = Unsafe.ReadUnaligned<T>(ref reader.Buffer[reader.Position]);
+                reader.Position += size;
             }
             #endregion
 
             #region HANDLE
             [MethodImpl(AggressiveInlining)]
-            internal static void _Initialize(uint chunksCapacity, ulong[][] chunkHeuristicMask, ushort chunkHeuristicMaskLen) => Instance.Initialize(chunksCapacity, chunkHeuristicMask, chunkHeuristicMaskLen);
+            internal static void _Initialize(uint chunksCapacity, ulong[][] chunkHeuristicMask, ushort chunkHeuristicMaskLen) {
+                #if FFS_ECS_DEBUG
+                instance.Initialize(chunksCapacity, chunkHeuristicMask, chunkHeuristicMaskLen);
+                #else
+                Instance.Initialize(chunksCapacity, chunkHeuristicMask, chunkHeuristicMaskLen);
+                #endif
+            }
 
             [MethodImpl(AggressiveInlining)]
             internal static void _Resize(uint chunksCapacity, ulong[][] chunkHeuristicMask) => Instance.Resize(chunksCapacity, chunkHeuristicMask);
@@ -3658,7 +3416,7 @@ namespace FFS.Libraries.StaticEcs {
             internal static void _TryToStringComponent(StringBuilder builder, uint eid) => Instance.TryToStringComponent(builder, new Entity(eid));
 
             [MethodImpl(AggressiveInlining)]
-            internal static void _WriteChunk(ref BinaryPackWriter writer, uint chunkIdx) => Instance.WriteChunk(ref writer, chunkIdx);
+            internal static void _WriteChunk(ref BinaryPackWriter writer, uint chunkIdx, bool withTracking) => Instance.WriteChunk(ref writer, chunkIdx, withTracking);
 
             [MethodImpl(AggressiveInlining)]
             internal static void _ReadChunk(ref BinaryPackReader reader, uint chunkIdx) => Instance.ReadChunk(ref reader, chunkIdx);

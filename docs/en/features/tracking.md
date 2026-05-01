@@ -8,12 +8,12 @@ nav_order: 13
 
 StaticEcs provides four types of change tracking, all zero-allocation and opt-in:
 
-| Type | What it tracks | Applies to | Config location |
-|------|---------------|------------|-----------------|
-| **Added** | Component/tag was added | Components, tags | `ComponentTypeConfig` / `TagTypeConfig` |
-| **Deleted** | Component/tag was removed | Components, tags | `ComponentTypeConfig` / `TagTypeConfig` |
-| **Changed** | Component data accessed via `ref` | Components only | `ComponentTypeConfig` |
-| **Created** | New entity was created | Entities (global) | `WorldConfig.TrackCreated` |
+| Type | What it tracks | Applies to | How to enable |
+|------|---------------|------------|---------------|
+| **Added** | Component/tag was added | Components, tags | Implement `ITrackableAdded` on the type |
+| **Deleted** | Component/tag was removed | Components, tags | Implement `ITrackableDeleted` on the type |
+| **Changed** | Component data accessed via `ref` | Components only | Implement `ITrackableChanged` on the component |
+| **Created** | New entity was created | Entities (global) | `WorldConfig.TrackCreated = true` |
 
 - Bitmap-based: one `ulong` per 64 entities per tracked type
 - Tracking is versioned per world tick via a ring buffer (default 8 ticks). Changes are written to the current tick's slot and become visible to tracking filters after `W.Tick()` advances the counter — no manual clearing needed
@@ -24,46 +24,47 @@ ___
 
 ## Configuration
 
-All tracking is disabled by default and must be explicitly enabled at registration time.
+All tracking is disabled by default and must be explicitly enabled by implementing the corresponding marker interface on the component/tag type.
+
+Tracking is controlled by three marker interfaces, applicable to both components and tags (with one exception noted below):
+
+| Interface | Enables |
+|-----------|---------|
+| `ITrackableAdded` | Tracking of additions (`AllAdded`, `NoneAdded`, `AnyAdded`, `Entity.HasAdded<T>()`) |
+| `ITrackableDeleted` | Tracking of deletions (`AllDeleted`, `NoneDeleted`, `AnyDeleted`, `Entity.HasDeleted<T>()`) |
+| `ITrackableChanged` | Tracking of value changes (`AllChanged`, `NoneChanged`, `AnyChanged`, `Entity.HasChanged<T>()`). Applies to components only — ignored on tags. |
+
+Query filters and `Entity.HasXxx<T>()` methods statically constrain their type parameters to the corresponding marker interface — missing a marker is a compile-time error, not a runtime assert.
+
+{: .note }
+A related opt-in marker — `IDisableable` — controls Disable/Enable support and the `*Disabled` query filters using the same compile-time-constraint pattern. Documented in [Component](component.md#enabledisable). It is not tracking, but follows the same "no marker → no allocation, no API surface" principle.
 
 ### Components
 
-`ComponentTypeConfig<T>` supports three tracking flags: `trackAdded`, `trackDeleted`, `trackChanged`:
-
 ```csharp
-// Tracking is configured by implementing IComponentConfig<T> on the component type:
-public struct Health : IComponent, IComponentConfig<Health> {
+// Track all three kinds
+public struct Health : IComponent, ITrackableAdded, ITrackableDeleted, ITrackableChanged {
     public float Value;
-    public ComponentTypeConfig<Health> Config() => new(
-        trackAdded: true,
-        trackDeleted: true,
-        trackChanged: true
-    );
 }
 
-// Enable only one direction
-public struct Velocity : IComponent, IComponentConfig<Velocity> {
+// Track only additions
+public struct Velocity : IComponent, ITrackableAdded {
     public float X, Y;
-    public ComponentTypeConfig<Velocity> Config() => new(
-        trackAdded: true  // track additions only
-    );
 }
 
-// Full configuration with tracking
-public struct Position : IComponent, IComponentConfig<Position> {
+// Combine marker interfaces with IComponentConfig<T> if you also need custom config
+public struct Position : IComponent, IComponentConfig<Position>,
+                         ITrackableAdded, ITrackableDeleted, ITrackableChanged {
     public float X, Y;
     public ComponentTypeConfig<Position> Config() => new(
         guid: new Guid("..."),
-        defaultValue: default,
-        trackAdded: true,
-        trackDeleted: true,
-        trackChanged: true
+        defaultValue: default
     );
 }
 
 W.Create(WorldConfig.Default());
 //...
-// Registration is parameterless — config is read from the interface
+// Registration is parameterless — marker interfaces are discovered via `default(T) is IMarker`
 W.Types().Component<Health>()
          .Component<Velocity>()
          .Component<Position>();
@@ -73,24 +74,15 @@ W.Initialize();
 
 ### Tags
 
-`TagTypeConfig<T>` supports `trackAdded` and `trackDeleted`. Tags do **not** support Changed tracking.
+Tags support `ITrackableAdded` and `ITrackableDeleted`. Tags do **not** support Changed tracking — `ITrackableChanged` on a tag is silently ignored.
 
 ```csharp
-// Tracking is configured by implementing ITagConfig<T> on the tag type:
-public struct Unit : ITag, ITagConfig<Unit> {
-    public TagTypeConfig<Unit> Config() => new(
-        trackAdded: true,
-        trackDeleted: true
-    );
-}
+public struct Unit : ITag, ITrackableAdded, ITrackableDeleted { }
 
-// With GUID for serialization
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
-    public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."),
-        trackAdded: true,
-        trackDeleted: true
-    );
+// With GUID for serialization via ITagConfig<T>
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
+    public TagTypeConfig<Poisoned> Config() => new(guid: new Guid("A1B2C3D4-..."));
 }
 
 // Registration is parameterless
@@ -116,7 +108,7 @@ W.Initialize();
 
 ### Auto-Registration
 
-`trackAdded`, `trackDeleted`, and `trackChanged` declared via `IComponentConfig<T>` / `ITagConfig<T>` are automatically picked up by `RegisterAll()` — no additional configuration needed.
+The `ITrackableAdded` / `ITrackableDeleted` / `ITrackableChanged` marker interfaces are detected automatically by `RegisterAll()` — no additional configuration is needed. Registration checks `default(T) is ITrackableXxx` for every registered component/tag type.
 
 ### Compile-Time Disable
 
@@ -540,12 +532,17 @@ entity.Destroy();
 
 ### After Deserialization
 
+- **World snapshot** (`LoadWorldSnapshot`): the entire tracking state — including `CurrentTick`, `CurrentLastTick`, all ring buffer slots for every component/tag with tracking markers, and world-level `TrackCreated` history — is restored verbatim. No call to `ClearTracking()` is required; after loading, `AllAdded<T>`, `AllChanged<T>`, `AllDeleted<T>`, `Created` and the per-entity `HasXxx(fromTick)` methods return the same results as before saving. The target world's `TrackingBufferSize` and `TrackCreated` must match those of the saved world — mismatch throws `StaticEcsException`.
+- **Cluster / chunk snapshot** (`LoadClusterSnapshot` / `LoadChunkSnapshot`): tracking data is **not** stored in these partial snapshots. Loading them does not touch the target world's tick or tracking history. Applied entity / component changes do **not** generate `Added` / `Changed` / `Deleted` bits in the target — they are direct mask writes. If you need the inserted chunks to participate in tracking from now on, call `ClearTracking()` (or the per-component / per-entity variants) to establish a clean baseline, then continue normally.
+
 ```csharp
-// ReadChunk writes masks directly — tracking is NOT triggered
-// ReadEntity goes through Add — components are marked as Added
-// Recommended to call ClearTracking() after loading:
-W.Serializer.ReadChunk(ref reader);
-W.ClearTracking(); // reset all tracking (in tick-based mode: clears all ring buffer slots)
+// World snapshot — tracking is fully restored, no extra action needed:
+W.Serializer.LoadWorldSnapshot(worldSnapshot);
+
+// Cluster / chunk snapshot — optional nuclear reset if the existing tracking
+// state conflicts with the freshly-loaded chunks:
+W.Serializer.LoadClusterSnapshot(clusterSnapshot);
+W.ClearTracking(); // optional; resets all ring buffer slots
 ```
 
 ___
@@ -610,6 +607,10 @@ bool bothTagsAdded = entity.HasAdded<Unit, Player>();          // Unit AND Playe
 // Tags — ANY semantics
 bool anyTagAdded = entity.HasAnyAdded<Unit, Player>();         // Unit OR Player added
 bool anyTagDeleted = entity.HasAnyDeleted<Unit, Player>();     // Unit OR Player deleted
+
+// Entity creation (requires WorldConfig.TrackCreated = true)
+bool wasCreated = entity.HasCreated();
+bool createdSinceTick5 = entity.HasCreated(fromTick: 5);
 
 // Combine with presence check
 if (entity.HasAdded<Position>() && entity.Has<Position>()) {

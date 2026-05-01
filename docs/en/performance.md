@@ -241,7 +241,7 @@ ___
 
 ## QueryMode
 
-The default is `QueryMode.Strict` — the fastest mode. Use `QueryMode.Flexible` only when you need to modify filtered components/tags on **other** entities during iteration:
+The default is `QueryMode.Strict` — the fastest mode. Use `QueryMode.Flexible` only when iteration logic needs to `Destroy` / `Disable` / `Enable` **other** entities during the loop (those are the only extra operations Flexible allows; modifying filtered component/tag types of other entities is still asserted in DEBUG in both modes):
 
 ```csharp
 // Strict (default) — fast path for full blocks
@@ -249,10 +249,12 @@ W.Query().For(
     static (ref Position pos) => { /* ... */ }
 );
 
-// Flexible — re-checks bitmasks on each iteration
+// Flexible — re-reads cached bitmask per entity so that
+// destroyed / disabled / enabled entities are skipped.
 W.Query().For(
     static (W.Entity entity, ref Position pos) => {
-        // Can modify Position on other entities
+        // Safe: destroy / disable / enable another entity here.
+        // Still forbidden: modifying filtered components of another entity.
     },
     queryMode: QueryMode.Flexible
 );
@@ -294,3 +296,4 @@ ___
 | Medium/High stripping in Unity | Removes unused generic overloads |
 | `UnmanagedPackArrayStrategy<T>` for serialization | Bulk memory copy |
 | Typed extension methods for IL2CPP | 10–25% faster than generic Entity wrappers |
+| Mark `IDisableable` only when actually toggled | Components without the marker save 4 ulong per segment of mask memory and skip the disabled flag in per-entity / per-chunk snapshots |

@@ -9,10 +9,6 @@ using Unity.IL2CPP.CompilerServices;
 #endif
 
 namespace FFS.Libraries.StaticEcs {
-    #if ENABLE_IL2CPP
-    [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
-    #endif
     /// <summary>
     /// Static factory class for creating composite <see cref="IQueryFilter"/> instances that combine
     /// multiple filters with AND semantics. Each <c>By</c> overload constructs an <c>And&lt;...&gt;</c>
@@ -28,6 +24,10 @@ namespace FFS.Libraries.StaticEcs {
     /// construct a composite filter separately from the query (e.g., to store or pass it around).
     /// </para>
     /// </summary>
+    #if ENABLE_IL2CPP
+    [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
+    [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
+    #endif
     public static class And {
         /// <summary>
         /// Creates a composite filter combining two <see cref="IQueryFilter"/> instances with AND semantics.
@@ -134,10 +134,6 @@ namespace FFS.Libraries.StaticEcs {
         }
     }
 
-    #if ENABLE_IL2CPP
-    [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
-    #endif
     /// <summary>
     /// A no-op query filter that matches all entities unconditionally. All <see cref="IQueryFilter"/>
     /// methods are empty — no chunk or entity bitmask bits are ever cleared.
@@ -146,6 +142,10 @@ namespace FFS.Libraries.StaticEcs {
     /// type parameters. Iterates over every alive entity (subject to <see cref="EntityStatusType"/>).
     /// </para>
     /// </summary>
+    #if ENABLE_IL2CPP
+    [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
+    [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
+    #endif
     public readonly struct Nothing : IQueryFilter {
         /// <inheritdoc/>
         [MethodImpl(AggressiveInlining)]
@@ -163,14 +163,6 @@ namespace FFS.Libraries.StaticEcs {
         public ulong BurstFilterEntities<TWorld>(uint segmentIdx, byte segmentBlockIdx) where TWorld : struct, IWorldType { return ulong.MaxValue; }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType { }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType { }
-
         #if FFS_ECS_DEBUG
         /// <inheritdoc/>
         public void Assert<TWorld>() where TWorld : struct, IWorldType { }
@@ -180,10 +172,6 @@ namespace FFS.Libraries.StaticEcs {
         #endif
     }
 
-    #if ENABLE_IL2CPP
-    [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
-    [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
-    #endif
     /// <summary>
     /// Composite query filter that combines two <see cref="IQueryFilter"/> instances with AND semantics.
     /// During filtering, each sub-filter's <see cref="IQueryFilter.FilterChunk{TWorld}"/> and
@@ -197,6 +185,10 @@ namespace FFS.Libraries.StaticEcs {
     /// that have Position AND do not have Dead.
     /// </para>
     /// </summary>
+    #if ENABLE_IL2CPP
+    [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
+    [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
+    #endif
     public struct And<TFilter0, TFilter1> : IQueryFilter
         where TFilter0 : struct, IQueryFilter
         where TFilter1 : struct, IQueryFilter {
@@ -240,27 +232,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);
@@ -269,11 +241,11 @@ namespace FFS.Libraries.StaticEcs {
         #endif
     }
 
+    /// <inheritdoc cref="And{TFilter0,TFilter1}"/>
     #if ENABLE_IL2CPP
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
     [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
     #endif
-    /// <inheritdoc cref="And{TFilter0,TFilter1}"/>
     public struct And<TFilter0, TFilter1, TFilter2> : IQueryFilter
         where TFilter0 : struct, IQueryFilter
         where TFilter1 : struct, IQueryFilter
@@ -323,30 +295,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-            _filter2.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-            _filter2.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-            _filter2.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);
@@ -356,11 +305,11 @@ namespace FFS.Libraries.StaticEcs {
         #endif
     }
 
+    /// <inheritdoc cref="And{TFilter0,TFilter1}"/>
     #if ENABLE_IL2CPP
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
     [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
     #endif
-    /// <inheritdoc cref="And{TFilter0,TFilter1}"/>
     public struct And<TFilter0, TFilter1, TFilter2, TFilter3> : IQueryFilter
         where TFilter0 : struct, IQueryFilter
         where TFilter1 : struct, IQueryFilter
@@ -418,33 +367,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-            _filter2.PushQueryData<TWorld>(data);
-            _filter3.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-            _filter2.PopQueryData<TWorld>();
-            _filter3.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-            _filter2.Assert<TWorld>();
-            _filter3.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);
@@ -455,11 +378,11 @@ namespace FFS.Libraries.StaticEcs {
         #endif
     }
 
+    /// <inheritdoc cref="And{TFilter0,TFilter1}"/>
     #if ENABLE_IL2CPP
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
     [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
     #endif
-    /// <inheritdoc cref="And{TFilter0,TFilter1}"/>
     public struct And<TFilter0, TFilter1, TFilter2, TFilter3, TFilter4> : IQueryFilter
         where TFilter0 : struct, IQueryFilter
         where TFilter1 : struct, IQueryFilter
@@ -525,36 +448,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-            _filter2.PushQueryData<TWorld>(data);
-            _filter3.PushQueryData<TWorld>(data);
-            _filter4.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-            _filter2.PopQueryData<TWorld>();
-            _filter3.PopQueryData<TWorld>();
-            _filter4.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-            _filter2.Assert<TWorld>();
-            _filter3.Assert<TWorld>();
-            _filter4.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);
@@ -566,11 +460,11 @@ namespace FFS.Libraries.StaticEcs {
         #endif
     }
 
+    /// <inheritdoc cref="And{TFilter0,TFilter1}"/>
     #if ENABLE_IL2CPP
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
     [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
     #endif
-    /// <inheritdoc cref="And{TFilter0,TFilter1}"/>
     public struct And<TFilter0, TFilter1, TFilter2, TFilter3, TFilter4, TFilter5> : IQueryFilter
         where TFilter0 : struct, IQueryFilter
         where TFilter1 : struct, IQueryFilter
@@ -644,39 +538,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         #endif
 
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PushQueryData<TWorld>(QueryData data) where TWorld : struct, IWorldType {
-            _filter0.PushQueryData<TWorld>(data);
-            _filter1.PushQueryData<TWorld>(data);
-            _filter2.PushQueryData<TWorld>(data);
-            _filter3.PushQueryData<TWorld>(data);
-            _filter4.PushQueryData<TWorld>(data);
-            _filter5.PushQueryData<TWorld>(data);
-        }
-
-        /// <inheritdoc/>
-        [MethodImpl(AggressiveInlining)]
-        public void PopQueryData<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.PopQueryData<TWorld>();
-            _filter1.PopQueryData<TWorld>();
-            _filter2.PopQueryData<TWorld>();
-            _filter3.PopQueryData<TWorld>();
-            _filter4.PopQueryData<TWorld>();
-            _filter5.PopQueryData<TWorld>();
-        }
-
         #if FFS_ECS_DEBUG
-        /// <inheritdoc/>
-        public void Assert<TWorld>() where TWorld : struct, IWorldType {
-            _filter0.Assert<TWorld>();
-            _filter1.Assert<TWorld>();
-            _filter2.Assert<TWorld>();
-            _filter3.Assert<TWorld>();
-            _filter4.Assert<TWorld>();
-            _filter5.Assert<TWorld>();
-        }
-
         /// <inheritdoc/>
         public void Block<TWorld>(int val) where TWorld : struct, IWorldType {
             _filter0.Block<TWorld>(val);

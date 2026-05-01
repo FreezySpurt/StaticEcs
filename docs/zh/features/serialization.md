@@ -151,16 +151,17 @@ W.Types()
 
 #### 完整配置:
 ```csharp
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
     public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."), // 序列化的稳定标识符（默认 — 从类型名称自动计算）
-        trackAdded: true,                // 启用添加追踪（默认 — false）
-        trackDeleted: true               // 启用删除追踪（默认 — false）
+        guid: new Guid("A1B2C3D4-...") // 序列化的稳定标识符（默认 — 从类型名称自动计算）
     );
 }
 
 W.Types().Tag<Poisoned>();
 ```
+
+变更追踪通过在类型本身上实现标记接口（`ITrackableAdded`、`ITrackableDeleted`）启用 — 参见[变更追踪](tracking)。
 
 {: .notezh }
 所有类型自动获得由类型名称计算的稳定 GUID。要覆盖，请在标签结构体上实现 `ITagConfig<T>` 并提供自定义 guid。
@@ -195,23 +196,16 @@ ___
 
 ## 世界快照（World Snapshot）
 
-保存完整的世界状态：所有实体、组件、标签和事件。
+保存完整的世界状态：所有实体、组件、标签、事件以及变更追踪状态。
 
-#### 在初始化时保存和加载：
-```csharp
-// 保存世界
-byte[] worldSnapshot = W.Serializer.CreateWorldSnapshot();
-W.Destroy();
+{: .important }
+**世界快照会持久化当前 tick 和完整的追踪历史。** 保存的数据流包括 `CurrentTick`、`CurrentLastTick` 以及全部 `TrackingBufferSize + 1` 个历史槽位——用于 `AllAdded<T>` / `AllChanged<T>` / `AllDeleted<T>` 过滤器、实体的 `HasAdded/HasChanged/HasDeleted` 方法，以及世界级的创建追踪（`HasCreated`）。加载之后，基于 tick 的追踪查询（包括使用 `fromTick` 的查询）返回的结果与保存前一致。
 
-// 在初始化时加载世界 — 最简单的方式
-CreateWorld(); // Create + 类型注册
-W.InitializeFromWorldSnapshot(worldSnapshot);
+{: .important }
+**加载时配置必须匹配。** 目标世界的 `TrackingBufferSize` 和 `TrackCreated` 必须与快照中保存的值相等。任何不一致都会抛出 `StaticEcsException`。这些值在创建世界时通过 `WorldConfig` 指定——保存和加载之间不支持更改这些值。
 
-// 所有实体和事件已恢复
-foreach (var entity in W.Query().Entities()) {
-    Console.WriteLine(entity.PrettyString);
-}
-```
+{: .note }
+每个快照以 2 字节的格式版本头（`FormatVersion = 2`）和 8 字节的快照大小开头。加载由不兼容版本生成的快照会抛出带有明确说明的 `StaticEcsException`。
 
 #### 在初始化后保存和加载：
 ```csharp
@@ -333,7 +327,8 @@ W.Destroy();
 
 // 2. 使用 GID Store 恢复世界
 CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
+W.Initialize();
+W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 
 // 新实体不会占用已保存实体的槽位
 var newEntity = W.NewEntity<Default>();
@@ -366,12 +361,10 @@ W.Serializer.CreateGIDStoreSnapshot(strategy: ChunkWritingStrategy.SelfOwner);
 // 按集群过滤
 W.Serializer.CreateGIDStoreSnapshot(clusters: new ushort[] { 0, 1 });
 
-// 从 GID Store 初始化世界
-CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
-
 // 在已初始化的世界中恢复 GID Store
 // 所有实体将被删除，状态将重置
+CreateWorld();
+W.Initialize();
 W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 ```
 
@@ -418,6 +411,9 @@ W.Serializer.LoadChunkSnapshot(chunkSnapshot);
 
 {: .importantzh }
 默认情况下，集群和块快照**不存储**实体标识符数据（仅存储组件数据）。如果需要作为新实体加载（`entitiesAsNew: true`），创建快照时请指定 `withEntitiesData: true`。
+
+{: .important }
+**集群和块快照不保存变更追踪数据。** 与世界快照不同，这些部分快照用于流式加载和迁移场景，目标世界拥有自己独立的 tick 和追踪状态。加载集群或块快照不会改变目标世界的 `CurrentTick`、`CurrentLastTick` 和追踪历史——只恢复实体、组件和标签。如果需要跨部分快照保持一致的追踪历史，请使用世界快照。
 
 ___
 
@@ -467,7 +463,8 @@ byte[] gidSnapshot = W.Serializer.CreateGIDStoreSnapshot();
 W.Destroy();
 
 CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
+W.Initialize();
+W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 
 // 以任意顺序加载
 W.Serializer.LoadClusterSnapshot(clusterSnapshot);
@@ -660,6 +657,162 @@ W.Serializer.LoadEventsSnapshot("path/to/events.bin");
 
 {: .notezh }
 使用 `CreateWorldSnapshot` 时，事件会自动保存（除非指定 `writeEvents: false`）。使用 `EntitiesSnapshot` 时需要单独序列化事件。
+
+___
+
+## 资源序列化
+
+`IResource` 提供四个可选的默认实现方法。重写 `Guid()` 以使资源自动加入快照序列化；其他方法仅在类型不是 unmanaged 时才需要。
+
+```csharp
+public interface IResource {
+    public Guid? Guid()                                              => null;
+    public byte  Version()                                            => 0;
+    public void  Write(ref BinaryPackWriter writer)                   {}
+    public void  Read(ref BinaryPackReader reader, byte version)      {}
+}
+```
+
+#### 验证规则（在第一次 `SetResource` 时检查）
+
+- 没有 `Guid`（默认 `null`）的资源会被静默排除在快照之外。
+- 如果 `Guid` 非空、类型不是 unmanaged（引用类型，或包含引用的 struct）、且缺少 `Write` 或 `Read` — 抛出 `StaticEcsException`。
+- 不同类型的两个 singleton 资源出现重复 `Guid` 时在 DEBUG 模式下断言。
+
+#### 格式选择
+
+- **没有 `Write`/`Read` 的 unmanaged struct** — 框架直接从 `Resources<TWorld, T>.Value` 或命名资源 box 写入/读取 `Unsafe.SizeOf<T>()` 个原始字节。
+- **非 unmanaged 类型，或 unmanaged 类型遇到版本不匹配** — 调用 `Read(ref reader, savedVersion)` 进行迁移；保存时调用 `Write(ref writer)`。
+
+#### 示例
+
+```csharp
+// Unmanaged singleton 资源 — 不需要 Write/Read
+public struct GameSettings : IResource {
+    public float MasterVolume;
+    public bool  Vsync;
+    public Guid? Guid() => new("11111111-2222-3333-4444-555555555555");
+}
+
+// 非 unmanaged 资源 — 需要 Write/Read
+public class AssetCache : IResource {
+    public Dictionary<string, byte[]> Items = new();
+
+    public Guid? Guid() => new("22222222-3333-4444-5555-666666666666");
+    public byte  Version() => 1;
+
+    public void Write(ref BinaryPackWriter writer) {
+        writer.WriteInt(Items.Count);
+        foreach (var kvp in Items) {
+            writer.WriteString16(kvp.Key);
+            writer.WriteByteArray(kvp.Value);
+        }
+    }
+
+    public void Read(ref BinaryPackReader reader, byte version) {
+        Items.Clear();
+        var count = reader.ReadInt();
+        for (var i = 0; i < count; i++) {
+            var key = reader.ReadString16();
+            Items[key] = reader.ReadByteArray();
+        }
+    }
+}
+```
+
+#### 进入快照的内容
+
+- **Singleton 资源**（`SetResource<T>(value, …)`）— 以类型 `T` 的 `Guid` 为键。
+- **命名资源**（`SetResource<T>(key, value, …)`）— 以类型 `T` 的 `Guid` 加字符串键为键。
+
+`WorldSnapshot` 自动包含两组（位于事件块和用户自定义快照数据之间）。如果只想保存或加载资源，可使用与事件镜像的独立 API：
+
+```csharp
+// 保存
+byte[] snapshot = W.Serializer.CreateResourcesSnapshot();
+W.Serializer.CreateResourcesSnapshot("resources.bin", gzip: true);
+
+// 加载
+W.Serializer.LoadResourcesSnapshot(snapshot);
+W.Serializer.LoadResourcesSnapshot("resources.bin", gzip: true);
+```
+
+加载时，当前未注册的 `Guid` 条目会被静默跳过（与已删除的组件或事件相同）— 在保存和加载之间添加或删除资源类型是向前兼容的。
+
+___
+
+## 系统序列化
+
+`ISystem` 拥有与 `IResource` 相同的四个可选方法。重写 `Guid()` 以使系统加入快照序列化。
+
+```csharp
+public interface ISystem {
+    public void Init()             { }
+    public void Update()           { }
+    public bool UpdateIsActive()   => true;
+    public void Destroy()          { }
+
+    public Guid? Guid()                                              => null;
+    public byte  Version()                                            => 0;
+    public void  Write(ref BinaryPackWriter writer)                   {}
+    public void  Read(ref BinaryPackReader reader, byte version)      {}
+}
+```
+
+#### 验证规则（在 `Add<TSystem>` 时检查）
+
+- 没有 `Guid` 的系统会被静默排除在快照之外。
+- 任何声明 `Guid` 的系统**必须**重写 `Write` 和 `Read` — 与布局无关。unmanaged 快速路径不适用：系统实例以装箱形式存储在 `SystemData.System` 中，框架始终调用钩子。缺少它们会从 `Add` 抛出 `StaticEcsException`。
+- 同一 `Systems<TSystemsType>` 组内的重复 `Guid` 在 DEBUG 模式下断言。
+
+#### 示例
+
+```csharp
+public class SpawnerSystem : ISystem {
+    private int _nextId;
+    private float _accumulator;
+
+    public Guid? Guid() => new("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    public byte  Version() => 1;
+
+    public void Update() { /* spawn 逻辑 */ }
+
+    public void Write(ref BinaryPackWriter writer) {
+        writer.WriteInt(_nextId);
+        writer.WriteFloat(_accumulator);
+    }
+
+    public void Read(ref BinaryPackReader reader, byte version) {
+        _nextId = reader.ReadInt();
+        _accumulator = reader.ReadFloat();
+    }
+}
+```
+
+#### `Systems<TSystemsType>.Create` 接受显式的组 `Guid`
+
+```csharp
+GameSys.Create(baseSize: 64);                                                // Guid = typeof(GameSystems).GuidFromAQN()
+GameSys.Create(baseSize: 64, snapshotGuid: new("…stable-pipeline-guid…"));   // 显式，可在命名空间重命名后保持
+```
+
+组在 `Create` 时将自身注册到世界的快照注册表中，在 `Destroy` 时取消注册。`WorldSnapshot` 遍历所有已注册的组，每个组写一个段；加载时未注册的组 `Guid` 段会被静默跳过。
+
+#### 独立 API
+
+镜像 `Create/LoadEventsSnapshot`。遍历所有已注册的 `Systems<TSystemsType>` 组（连同其作用域内的资源）：
+
+```csharp
+// 保存
+byte[] snapshot = W.Serializer.CreateSystemsSnapshot();
+W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
+
+// 加载
+W.Serializer.LoadSystemsSnapshot(snapshot);
+W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+```
+
+每个组段包含其作用域内的资源（singleton + named），然后是组内每个声明 `Guid` 的系统。
 
 ___
 

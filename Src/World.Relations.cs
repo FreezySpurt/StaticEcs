@@ -93,7 +93,7 @@ namespace FFS.Libraries.StaticEcs {
         #if NET5_0_OR_GREATER
         [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Link type metadata is preserved by the registration path.")]
         #endif
-        public struct Link<TLinkType> : ILinkComponent, IMultiComponent, IComponentHookOverride, IEquatable<Link<TLinkType>>
+        public struct Link<TLinkType> : ILinkComponent, IMultiComponent, IComponentHookOverride, IDisableable, IEquatable<Link<TLinkType>>
             where TLinkType : unmanaged, ILinkType {
 
             #if UNITY_2022_1_OR_NEWER
@@ -101,7 +101,11 @@ namespace FFS.Libraries.StaticEcs {
             #endif
             [MethodImpl(NoInlining)]
             internal static void AutoRegister() {
+                #if FFS_ECS_DEBUG
+                if (Components<Link<TLinkType>>.instance.IsRegistered) return;
+                #else
                 if (Components<Link<TLinkType>>.Instance.IsRegistered) return;
+                #endif
                 ComponentTypeConfig<Link<TLinkType>> config = default;
                 if (default(TLinkType) is ILinkConfig<TLinkType> cfg) {
                     config = cfg.Config<TWorld>();
@@ -235,14 +239,18 @@ namespace FFS.Libraries.StaticEcs {
         #if NET5_0_OR_GREATER
         [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Link type metadata is preserved by the registration path.")]
         #endif
-        public struct Links<TLinkType> : ILinksComponent, IComponentInternal, IComponentStrategyOverride, IEquatable<Links<TLinkType>> where TLinkType : unmanaged, ILinksType {
+        public struct Links<TLinkType> : ILinksComponent, IComponentInternal, IComponentStrategyOverride, IDisableable, IEquatable<Links<TLinkType>> where TLinkType : unmanaged, ILinksType {
 
             #if UNITY_2022_1_OR_NEWER
             [UnityEngine.Scripting.Preserve]
             #endif
             [MethodImpl(NoInlining)]
             internal static void AutoRegister() {
+                #if FFS_ECS_DEBUG
+                if (Components<Links<TLinkType>>.instance.IsRegistered) return;
+                #else
                 if (Components<Links<TLinkType>>.Instance.IsRegistered) return;
+                #endif
                 ComponentTypeConfig<Links<TLinkType>> config = default;
                 if (default(TLinkType) is ILinksConfig<TLinkType> cfg) {
                     config = cfg.Config<TWorld>();
@@ -306,7 +314,7 @@ namespace FFS.Libraries.StaticEcs {
                         throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.Indexer ] index out of bounds: {idx}, count: {Count}");
                     }
                     #endif
-                    return Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx][Offset + idx];
+                    return Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx][Offset + idx];
                 }
             }
 
@@ -314,7 +322,7 @@ namespace FFS.Libraries.StaticEcs {
             /// Returns a read-only span over the links in this collection.
             /// </summary>
             public readonly ReadOnlySpan<Link<TLinkType>> AsReadOnlySpan {
-                [MethodImpl(AggressiveInlining)] get => new(Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], (int)Offset, Count);
+                [MethodImpl(AggressiveInlining)] get => new(Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], (int)Offset, Count);
             }
 
             /// <summary>
@@ -327,7 +335,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 if (Count == 0) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.First ] empty");
                 #endif
-                return Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx][Offset];
+                return Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx][Offset];
             }
 
             /// <summary>
@@ -340,7 +348,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 if (Count == 0) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.Last ] empty");
                 #endif
-                return Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx][Offset + Count - 1];
+                return Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx][Offset + Count - 1];
             }
 
             #region ADD
@@ -356,7 +364,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertNotBlockedByIteration();
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var values = storage.Segments[SegmentIdx];
                 
                 for (var i = Offset; i < Offset + Count; i++) {
@@ -386,7 +394,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertNotBlockedByIteration();
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var values = storage.Segments[SegmentIdx];
                 var end = Offset + Count;
 
@@ -422,7 +430,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertNotBlockedByIteration();
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var values = storage.Segments[SegmentIdx];
                 var end = Offset + Count;
 
@@ -462,7 +470,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertNotBlockedByIteration();
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var values = storage.Segments[SegmentIdx];
                 var end = Offset + Count;
 
@@ -507,7 +515,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 AssertNotContains(val);
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 if (Count >= SegmentAllocator.MinSlotCapacity << Level) {
                     Grow(ref storage);
                 }
@@ -528,7 +536,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotContains(val1);
                 AssertNotContains(val2);
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (Count + 1 >= cap) {
                     EnsureCapacityInternal(ref storage, (ushort)(Count + 2));
@@ -555,7 +563,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotContains(val2);
                 AssertNotContains(val3);
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (Count + 2 >= cap) {
                     EnsureCapacityInternal(ref storage, (ushort)(Count + 3));
@@ -586,7 +594,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotContains(val3);
                 AssertNotContains(val4);
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (Count + 3 >= cap) {
                     EnsureCapacityInternal(ref storage, (ushort)(Count + 4));
@@ -639,7 +647,7 @@ namespace FFS.Libraries.StaticEcs {
                         AssertNotContains(src[j]);
                     }
                     #endif
-                    ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                    ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                     var cap = SegmentAllocator.MinSlotCapacity << Level;
                     if (Count + len > cap) {
                         EnsureCapacityInternal(ref storage, (ushort)(Count + len));
@@ -672,7 +680,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (idx < 0 || idx >= Count) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.RemoveAt ] index out of bounds: {idx}");
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var values = storage.Segments[SegmentIdx];
                 if (storage.HasOnDelete) {
                     values[Offset + idx].OnDelete(EntityOwner, HookReason.Default);
@@ -700,7 +708,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (idx < 0 || idx >= Count) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.RemoveAtSwap ] index out of bounds: {idx}");
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var values = storage.Segments[SegmentIdx];
                 if (withOnDelete && storage.HasOnDelete) {
                     values[Offset + idx].OnDelete(EntityOwner, HookReason.Default);
@@ -720,7 +728,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (Count == 0) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.RemoveFirst ] empty");
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var values = storage.Segments[SegmentIdx];
                 if (storage.HasOnDelete) {
                     values[Offset].OnDelete(EntityOwner, HookReason.Default);
@@ -746,7 +754,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (Count == 0) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.RemoveFirstSwap ] empty");
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var values = storage.Segments[SegmentIdx];
                 if (storage.HasOnDelete) {
                     values[Offset].OnDelete(EntityOwner, HookReason.Default);
@@ -766,7 +774,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (Count == 0) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.RemoveLast ] empty");
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 var values = storage.Segments[SegmentIdx];
                 if (storage.HasOnDelete) {
                     values[Offset + Count - 1].OnDelete(EntityOwner, HookReason.Default);
@@ -817,7 +825,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 #endif
                 if (Count > 0) {
-                    ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                    ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                     var values = storage.Segments[SegmentIdx];
                     if (storage.HasOnDelete) {
                         var owner = EntityOwner;
@@ -855,7 +863,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <returns>The index of the link, or -1 if not present.</returns>
             [MethodImpl(AggressiveInlining)]
             public readonly int IndexOf(Link<TLinkType> item) {
-                var values = Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
                 var indexOf = Array.IndexOf(values, item, (int)Offset, Count);
                 return indexOf >= 0 ? (int)(indexOf - Offset) : -1;
             }
@@ -867,7 +875,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <returns><c>true</c> if found; otherwise <c>false</c>.</returns>
             [MethodImpl(AggressiveInlining)]
             public readonly bool Contains(Link<TLinkType> item) {
-                var values = Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
                 for (var i = Offset; i < Offset + Count; i++) {
                     if (values[i].Equals(item)) return true;
                 }
@@ -884,7 +892,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <returns><c>true</c> if found; otherwise <c>false</c>.</returns>
             [MethodImpl(AggressiveInlining)]
             public readonly bool Contains<TComparer>(Link<TLinkType> item, TComparer comparer) where TComparer : IEqualityComparer<Link<TLinkType>> {
-                var values = Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
                 for (var i = Offset; i < Offset + Count; i++) {
                     if (comparer.Equals(values[i], item)) return true;
                 }
@@ -908,7 +916,7 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (Count + additionalSize > cap) {
-                    ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                    ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                     EnsureCapacityInternal(ref storage, (ushort)(Count + additionalSize));
                 }
             }
@@ -925,7 +933,7 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (cap < newCapacity) {
-                    ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                    ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                     EnsureCapacityInternal(ref storage, newCapacity);
                 }
             }
@@ -941,7 +949,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (dst == null) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.CopyTo ] dst is null");
                 if (Count > dst.Length) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.CopyTo ] count > dst.Length");
                 #endif
-                Utils.LoopFallbackCopy(Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], Offset, dst, 0, Count);
+                Utils.LoopFallbackCopy(Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], Offset, dst, 0, Count);
             }
 
             /// <summary>
@@ -958,7 +966,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (dstIdx + len > dst.Length) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.CopyTo ] dstIdx + len > dst.Length");
                 if (len > Count) throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.CopyTo ] len > count");
                 #endif
-                Utils.LoopFallbackCopy(Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], Offset, dst, (uint)dstIdx, (uint)len);
+                Utils.LoopFallbackCopy(Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], Offset, dst, (uint)dstIdx, (uint)len);
             }
 
             /// <summary>
@@ -966,7 +974,7 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly void Sort() {
-                Array.Sort(Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], (int)Offset, Count);
+                Array.Sort(Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], (int)Offset, Count);
             }
 
             /// <summary>
@@ -976,7 +984,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <param name="comparer">The comparer to use for ordering.</param>
             [MethodImpl(AggressiveInlining)]
             public readonly void Sort<TComparer>(TComparer comparer) where TComparer : IComparer<Link<TLinkType>> {
-                Array.Sort(Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], (int)Offset, Count, comparer);
+                Array.Sort(Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], (int)Offset, Count, comparer);
             }
 
             /// <summary>
@@ -984,7 +992,7 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             public readonly override string ToString() {
                 var res = "";
-                var values = Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
                 for (int i = 0; i < Count; i++) {
                     res += values[Offset + i].ToString();
                     if (i + 1 < Count) res += ", ";
@@ -999,7 +1007,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <returns>A <see cref="ROMultiComponentsIterator{T}"/> for iterating over the links.</returns>
             [MethodImpl(AggressiveInlining)]
             public ROMultiComponentsIterator<Link<TLinkType>> GetEnumerator() => new(
-                Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx],
+                Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx],
                 SegmentIdx,
                 Offset,
                 Count
@@ -1044,7 +1052,7 @@ namespace FFS.Libraries.StaticEcs {
                 var segmentIdx = entityId >> Const.ENTITIES_IN_SEGMENT_SHIFT;
                 var segmentEntityIdx = (byte)(entityId & Const.ENTITIES_IN_SEGMENT_MASK);
 
-                ref var storage = ref World<TW>.Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref World<TW>.Resources<TW, MultiValueStorage<Link<TLinkType>>>.Value;
                 storage.EnsureSegment(segmentIdx);
 
                 SegmentIdx = segmentIdx;
@@ -1056,7 +1064,7 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             public void OnDelete<TW>(World<TW>.Entity self, HookReason reason) where TW : struct, IWorldType {
-                ref var storage = ref World<TW>.Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref World<TW>.Resources<TW, MultiValueStorage<Link<TLinkType>>>.Value;
                 Clear();
                 storage.Allocators[SegmentIdx].Free(Offset, Level, out var empty);
                 if (empty) {
@@ -1066,7 +1074,7 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             public void CopyTo<TW>(World<TW>.Entity self, World<TW>.Entity other, bool disabled) where TW : struct, IWorldType {
-                ref var storage = ref World<TW>.Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref World<TW>.Resources<TW, MultiValueStorage<Link<TLinkType>>>.Value;
                 if (storage.HasOnCopy) {
                     ref var dst = ref World<TW>.Components<Links<TLinkType>>.Instance.Add(other);
 
@@ -1096,7 +1104,7 @@ namespace FFS.Libraries.StaticEcs {
             public void Write<TW>(ref BinaryPackWriter writer, World<TW>.Entity self) where TW : struct, IWorldType {
                 writer.WriteUshort(Count);
                 if (Count > 0) {
-                    writer.WriteArrayUnmanaged(World<TW>.Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], (int)Offset, Count);
+                    writer.WriteArrayUnmanaged(World<TW>.Resources<TW, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx], (int)Offset, Count);
                 }
             }
 
@@ -1107,7 +1115,7 @@ namespace FFS.Libraries.StaticEcs {
                 var segmentIdx = entityId >> Const.ENTITIES_IN_SEGMENT_SHIFT;
                 var segmentEntityIdx = (byte)(entityId & Const.ENTITIES_IN_SEGMENT_MASK);
 
-                ref var storage = ref World<TW>.Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref World<TW>.Resources<TW, MultiValueStorage<Link<TLinkType>>>.Value;
                 storage.EnsureSegment(segmentIdx);
 
                 SegmentIdx = segmentIdx;
@@ -1122,7 +1130,7 @@ namespace FFS.Libraries.StaticEcs {
             }
             
             void IComponentInternal.OnInitialize<TW>() {
-                ref var storage = ref World<TW>.ResourcesData.Instance.GetOrCreate<MultiValueStorage<Link<TLinkType>>>(out var isNew);
+                ref var storage = ref World<TW>.ResourcesData<TW>.Instance.GetOrCreate<MultiValueStorage<Link<TLinkType>>>(out var isNew);
                 if (isNew) {
                     storage.Init(Data.Instance.EntitiesSegments.Length, LinkType<TLinkType>.HasOnAdd(), LinkType<TLinkType>.HasOnDelete(), LinkType<TLinkType>.HasCopyTo(), false, false);
                     storage.ElementStrategy = new UnmanagedPackArrayStrategy<Link<TLinkType>>();
@@ -1143,14 +1151,14 @@ namespace FFS.Libraries.StaticEcs {
             #if FFS_ECS_DEBUG
             [MethodImpl(AggressiveInlining)]
             private readonly void AssertNotBlockedByIteration() {
-                if (Resources<MultiValueStorage<Link<TLinkType>>>.Value.IsBlockedByIteration(SegmentIdx, Offset)) {
+                if (Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.IsBlockedByIteration(SegmentIdx, Offset)) {
                     throw new StaticEcsException($"[ Links<{typeof(TLinkType)}> ] Cannot modify while being iterated.");
                 }
             }
 
             [MethodImpl(AggressiveInlining)]
             private readonly void AssertNotContains(Link<TLinkType> val) {
-                var values = Resources<MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value.Segments[SegmentIdx];
                 for (var i = Offset; i < Offset + Count; i++) {
                     if (values[i].Equals(val)) {
                         throw new StaticEcsException($"[ Links<{typeof(TLinkType)}>.Add ] duplicate value: {val}");
@@ -1161,7 +1169,7 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             internal static void _ResizeStorage(uint segmentCapacity) {
-                ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                 if (storage.Segments != null) {
                     storage.EnsureCapacity((int)segmentCapacity);
                 }
@@ -1209,7 +1217,7 @@ namespace FFS.Libraries.StaticEcs {
         [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
         [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
         #endif
-        internal struct DeepDestroyLinkFunction<TLinkType> where TLinkType : unmanaged, ILinkType {
+        internal struct DeepDestroyLinkFunction<TLinkType> : IResource where TLinkType : unmanaged, ILinkType {
             internal bool Active;
 
             [MethodImpl(AggressiveInlining)]
@@ -1236,7 +1244,7 @@ namespace FFS.Libraries.StaticEcs {
         [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
         [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
         #endif
-        internal struct DeepDestroyLinksFunction<TLinkType> where TLinkType : unmanaged, ILinksType {
+        internal struct DeepDestroyLinksFunction<TLinkType> : IResource where TLinkType : unmanaged, ILinksType {
             internal Stack<EntityGID> Ranges;
             internal bool Active;
 
@@ -1247,7 +1255,7 @@ namespace FFS.Libraries.StaticEcs {
                     Ranges ??= new Stack<EntityGID>(64);
 
                     ref var components = ref Components<Links<TLinkType>>.Instance;
-                    ref var storage = ref Resources<MultiValueStorage<Link<TLinkType>>>.Value;
+                    ref var storage = ref Resources<TWorld, MultiValueStorage<Link<TLinkType>>>.Value;
                     Ranges.Push(value);
 
                     while (Ranges.Count > 0) {
@@ -1366,7 +1374,7 @@ namespace FFS.Libraries.StaticEcs {
         public static void DeepDestroyLink<TW, TLink>(this EntityGID targetGID)
             where TW : struct, IWorldType 
             where TLink : unmanaged, ILinkType {
-            World<TW>.ResourcesData.Instance.GetOrCreate<World<TW>.DeepDestroyLinkFunction<TLink>>(out _).Invoke(targetGID);
+            World<TW>.ResourcesData<TW>.Instance.GetOrCreate<World<TW>.DeepDestroyLinkFunction<TLink>>(out _).Invoke(targetGID);
         }
 
         /// <summary>
@@ -1482,7 +1490,7 @@ namespace FFS.Libraries.StaticEcs {
         public static void DeepDestroyLinkItem<TW, TLink>(this EntityGID targetGID)
             where TW : struct, IWorldType 
             where TLink : unmanaged, ILinksType {
-            World<TW>.ResourcesData.Instance.GetOrCreate<World<TW>.DeepDestroyLinksFunction<TLink>>(out _).Invoke(targetGID);
+            World<TW>.ResourcesData<TW>.Instance.GetOrCreate<World<TW>.DeepDestroyLinksFunction<TLink>>(out _).Invoke(targetGID);
         }
     }
     
@@ -1547,7 +1555,7 @@ namespace FFS.Libraries.StaticEcs {
 
             if (newSegment) {
                 var segIdx = value[idx].SegmentIdx;
-                ref var storage = ref World<TWorld>.Resources<MultiValueStorage<World<TWorld>.Link<TLinkType>>>.Value;
+                ref var storage = ref World<TWorld>.Resources<TWorld, MultiValueStorage<World<TWorld>.Link<TLinkType>>>.Value;
                 ref var alloc = ref storage.Allocators[segIdx];
 
                 writer.WriteUint(alloc.Used);
@@ -1573,7 +1581,7 @@ namespace FFS.Libraries.StaticEcs {
 
             if (reader.ReadBool()) {
                 var segIdx = result[idx].SegmentIdx;
-                ref var storage = ref World<TWorld>.Resources<MultiValueStorage<World<TWorld>.Link<TLinkType>>>.Value;
+                ref var storage = ref World<TWorld>.Resources<TWorld, MultiValueStorage<World<TWorld>.Link<TLinkType>>>.Value;
 
                 storage.EnsureSegment(segIdx);
                 ref var alloc = ref storage.Allocators[segIdx];

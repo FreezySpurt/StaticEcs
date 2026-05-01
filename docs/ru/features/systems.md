@@ -48,6 +48,12 @@ public interface ISystem {
 
     // Вызывается один раз при Systems.Destroy()
     void Destroy() { }
+
+    // Хуки сериализации в снапшот — переопределите Guid(), чтобы подключить систему к снапшотам
+    Guid? Guid()                                              => null;
+    byte  Version()                                            => 0;
+    void  Write(ref BinaryPackWriter writer)                   {}
+    void  Read(ref BinaryPackReader reader, byte version)      {}
 }
 ```
 
@@ -101,8 +107,10 @@ Create() → Add() → Initialize() → Update() цикл → Destroy()
 ```
 
 ```csharp
-// 1. Создать группу систем (baseSize — начальная ёмкость массива)
+// 1. Создать группу систем (baseSize — начальная ёмкость массива, snapshotGuid — идентификатор группы в снапшотах)
 GameSys.Create(baseSize: 64);
+// либо с явным Guid группы для стабильности снапшотов при переименовании:
+// GameSys.Create(baseSize: 64, snapshotGuid: new("…stable-pipeline-guid…"));
 
 // 2. Зарегистрировать системы (order определяет порядок выполнения)
 GameSys.Add(new InputSystem(), order: -10)
@@ -267,3 +275,46 @@ while (gameIsRunning) {
 GameSys.Destroy();
 W.Destroy();
 ```
+
+___
+
+## Сериализация в снапшот
+
+`ISystem` имеет четыре опциональных метода с дефолтной реализацией (`Guid?`, `Version`, `Write`, `Read`) — та же форма, что и у `IResource`. Переопределите `Guid()`, чтобы подключить инстанс системы к сериализации:
+
+```csharp
+public class SpawnerSystem : ISystem {
+    private int _nextId;
+
+    public Guid? Guid() => new("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    public byte  Version() => 1;
+
+    public void Update() { /* ... */ }
+
+    public void Write(ref BinaryPackWriter writer)              => writer.WriteInt(_nextId);
+    public void Read(ref BinaryPackReader reader, byte version) => _nextId = reader.ReadInt();
+}
+```
+
+Валидация выполняется при `Add<TSystem>`:
+
+- Системы без `Guid` молча не попадают в снапшот.
+- Любая система с `Guid` обязана переопределить **и** `Write`, **и** `Read` независимо от лэйаута (инстансы систем хранятся упакованными в `SystemData`, поэтому unmanaged fast-path неприменим). Их отсутствие выбрасывает `StaticEcsException`.
+- Дубликат `Guid` внутри одной группы `Systems<TSystemsType>` ассертится в DEBUG.
+
+Каждый `Systems<TSystemsType>.Create` регистрирует свою группу в реестре снапшотов мира; `Guid` группы по умолчанию = `typeof(TSystemsType).GuidFromAQN()` и переопределяется опциональным параметром `snapshotGuid`. `WorldSnapshot` автоматически пишет одну секцию на группу (её scoped-ресурсы + все системы с `Guid`); при загрузке секции с незарегистрированным `Guid` группы молча пропускаются.
+
+Отдельный API зеркалирует `Create/LoadEventsSnapshot`:
+
+```csharp
+// Сохранить
+byte[] snapshot = W.Serializer.CreateSystemsSnapshot();
+W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
+
+// Загрузить
+W.Serializer.LoadSystemsSnapshot(snapshot);
+W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+```
+
+Полные детали формата и миграции: см. [Сериализация → Сериализация систем](./serialization.md).
+

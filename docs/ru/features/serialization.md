@@ -151,16 +151,17 @@ W.Types()
 
 #### Полная конфигурация:
 ```csharp
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
     public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."), // стабильный идентификатор для сериализации (по умолчанию — автоматически из имени типа)
-        trackAdded: true,                // включить отслеживание добавления (по умолчанию — false)
-        trackDeleted: true               // включить отслеживание удаления (по умолчанию — false)
+        guid: new Guid("A1B2C3D4-...") // стабильный идентификатор для сериализации (по умолчанию — автоматически из имени типа)
     );
 }
 
 W.Types().Tag<Poisoned>();
 ```
+
+Отслеживание изменений включается реализацией интерфейсов-маркеров (`ITrackableAdded`, `ITrackableDeleted`) на самом типе — см. [Отслеживание изменений](tracking).
 
 {: .noteru }
 Все типы автоматически получают стабильный GUID, вычисленный из имени типа. Для переопределения реализуйте `ITagConfig<T>` на структуре тега с пользовательским guid.
@@ -195,23 +196,16 @@ ___
 
 ## Снимок мира (World Snapshot)
 
-Сохраняет полное состояние мира: все сущности, компоненты, теги и события.
+Сохраняет полное состояние мира: все сущности, компоненты, теги, события и состояние отслеживания изменений.
 
-#### Сохранение и загрузка при инициализации:
-```csharp
-// Сохранение мира
-byte[] worldSnapshot = W.Serializer.CreateWorldSnapshot();
-W.Destroy();
+{: .important }
+**Снимок мира сохраняет тик и всю историю трекинга.** В поток записываются `CurrentTick`, `CurrentLastTick` и все `TrackingBufferSize + 1` слотов истории — для фильтров `AllAdded<T>` / `AllChanged<T>` / `AllDeleted<T>`, методов `HasAdded/HasChanged/HasDeleted` на сущности, а также мирового трекинга создания (`HasCreated`). После загрузки tick-based запросы (включая использующие `fromTick`) возвращают те же результаты, что и до сохранения.
 
-// Загрузка мира при инициализации — самый простой способ
-CreateWorld(); // Create + регистрация типов
-W.InitializeFromWorldSnapshot(worldSnapshot);
+{: .important }
+**Конфигурация должна совпадать при загрузке.** Значения `TrackingBufferSize` и `TrackCreated` целевого мира должны быть равны тем, что были при сохранении. Любое несовпадение приводит к `StaticEcsException`. Эти значения задаются в `WorldConfig` при создании мира — менять их между сохранением и загрузкой нельзя.
 
-// Все сущности и события восстановлены
-foreach (var entity in W.Query().Entities()) {
-    Console.WriteLine(entity.PrettyString);
-}
-```
+{: .note }
+Каждый снимок начинается с 2-байтового заголовка версии формата (`FormatVersion = 2`) и 8-байтового размера снимка. Загрузка снимка, созданного несовместимой версией, приводит к `StaticEcsException` с понятным сообщением.
 
 #### Сохранение и загрузка после инициализации:
 ```csharp
@@ -333,7 +327,8 @@ W.Destroy();
 
 // 2. Восстанавливаем мир с GID Store
 CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
+W.Initialize();
+W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 
 // Новые сущности не займут слоты сохранённых
 var newEntity = W.NewEntity<Default>();
@@ -366,12 +361,10 @@ W.Serializer.CreateGIDStoreSnapshot(strategy: ChunkWritingStrategy.SelfOwner);
 // Фильтрация по кластерам
 W.Serializer.CreateGIDStoreSnapshot(clusters: new ushort[] { 0, 1 });
 
-// Инициализация мира из GID Store
-CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
-
 // Восстановление GID Store в уже инициализированном мире
 // Все сущности удаляются, состояние сбрасывается
+CreateWorld();
+W.Initialize();
 W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 ```
 
@@ -418,6 +411,9 @@ W.Serializer.LoadChunkSnapshot(chunkSnapshot);
 
 {: .importantru }
 По умолчанию снимки кластеров и чанков **не хранят** данные идентификаторов сущностей (только данные компонентов). Если нужно загружать их как новые сущности (`entitiesAsNew: true`), при создании снимка укажите `withEntitiesData: true`.
+
+{: .important }
+**Снимки кластеров и чанков не сохраняют данные отслеживания изменений.** В отличие от снимка мира, эти частичные снимки предназначены для стриминга и миграции, когда у целевого мира свой независимый тик и своё состояние трекинга. Загрузка снимка кластера или чанка не изменяет `CurrentTick`, `CurrentLastTick` и историю трекинга целевого мира — восстанавливаются только сущности, компоненты и теги. Если нужна согласованная история трекинга через частичные снимки — используйте снимок мира.
 
 ___
 
@@ -467,7 +463,8 @@ byte[] gidSnapshot = W.Serializer.CreateGIDStoreSnapshot();
 W.Destroy();
 
 CreateWorld();
-W.InitializeFromGIDStoreSnapshot(gidSnapshot);
+W.Initialize();
+W.Serializer.RestoreFromGIDStoreSnapshot(gidSnapshot);
 
 // Загружаем в любом порядке
 W.Serializer.LoadClusterSnapshot(clusterSnapshot);
@@ -660,6 +657,162 @@ W.Serializer.LoadEventsSnapshot("path/to/events.bin");
 
 {: .noteru }
 При использовании `CreateWorldSnapshot` события сохраняются автоматически (если не указано `writeEvents: false`). Отдельная сериализация событий нужна при использовании `EntitiesSnapshot`.
+
+___
+
+## Сериализация ресурсов
+
+`IResource` имеет четыре опциональных метода с дефолтной реализацией. Переопределите `Guid()`, чтобы подключить ресурс к автоматической сериализации; остальные нужны только если тип не unmanaged.
+
+```csharp
+public interface IResource {
+    public Guid? Guid()                                              => null;
+    public byte  Version()                                            => 0;
+    public void  Write(ref BinaryPackWriter writer)                   {}
+    public void  Read(ref BinaryPackReader reader, byte version)      {}
+}
+```
+
+#### Правила валидации (проверяются при первом `SetResource`)
+
+- Ресурсы без `Guid` (дефолт `null`) молча не попадают в снапшот.
+- Если `Guid` не пуст, тип не unmanaged (ссылочный тип или struct, содержащий ссылки) и нет одного из `Write`/`Read` — выбрасывается `StaticEcsException`.
+- Дубликат `Guid` между двумя singleton-ресурсами разных типов ассертится в DEBUG.
+
+#### Выбор формата
+
+- **Unmanaged struct без `Write`/`Read`** — фреймворк пишет/читает `Unsafe.SizeOf<T>()` сырых байт напрямую из `Resources<TWorld, T>.Value` или из box-а именованного ресурса.
+- **Не-unmanaged тип, либо несовпадение версии для unmanaged** — вызывается `Read(ref reader, savedVersion)` для миграции; на сохранение — `Write(ref writer)`.
+
+#### Примеры
+
+```csharp
+// Unmanaged singleton-ресурс — Write/Read не требуются
+public struct GameSettings : IResource {
+    public float MasterVolume;
+    public bool  Vsync;
+    public Guid? Guid() => new("11111111-2222-3333-4444-555555555555");
+}
+
+// Не-unmanaged ресурс — Write/Read обязательны
+public class AssetCache : IResource {
+    public Dictionary<string, byte[]> Items = new();
+
+    public Guid? Guid() => new("22222222-3333-4444-5555-666666666666");
+    public byte  Version() => 1;
+
+    public void Write(ref BinaryPackWriter writer) {
+        writer.WriteInt(Items.Count);
+        foreach (var kvp in Items) {
+            writer.WriteString16(kvp.Key);
+            writer.WriteByteArray(kvp.Value);
+        }
+    }
+
+    public void Read(ref BinaryPackReader reader, byte version) {
+        Items.Clear();
+        var count = reader.ReadInt();
+        for (var i = 0; i < count; i++) {
+            var key = reader.ReadString16();
+            Items[key] = reader.ReadByteArray();
+        }
+    }
+}
+```
+
+#### Что попадает в снапшот
+
+- **Singleton-ресурсы** (`SetResource<T>(value, …)`) — ключ — `Guid` типа `T`.
+- **Именованные ресурсы** (`SetResource<T>(key, value, …)`) — ключ — `Guid` типа `T` плюс строковый ключ.
+
+`WorldSnapshot` автоматически включает обе группы (между событиями и пользовательскими `SnapshotHandlers`). Чтобы сохранить или загрузить только ресурсы, есть отдельный API по образцу событий:
+
+```csharp
+// Сохранить
+byte[] snapshot = W.Serializer.CreateResourcesSnapshot();
+W.Serializer.CreateResourcesSnapshot("resources.bin", gzip: true);
+
+// Загрузить
+W.Serializer.LoadResourcesSnapshot(snapshot);
+W.Serializer.LoadResourcesSnapshot("resources.bin", gzip: true);
+```
+
+При загрузке записи, `Guid` которых не зарегистрирован сейчас, молча пропускаются (как и для удалённых компонентов или событий) — добавление или удаление типа ресурса между save и load forward-совместимо.
+
+___
+
+## Сериализация систем
+
+`ISystem` имеет те же четыре опциональных метода, что и `IResource`. Переопределите `Guid()`, чтобы подключить систему к сериализации.
+
+```csharp
+public interface ISystem {
+    public void Init()             { }
+    public void Update()           { }
+    public bool UpdateIsActive()   => true;
+    public void Destroy()          { }
+
+    public Guid? Guid()                                              => null;
+    public byte  Version()                                            => 0;
+    public void  Write(ref BinaryPackWriter writer)                   {}
+    public void  Read(ref BinaryPackReader reader, byte version)      {}
+}
+```
+
+#### Правила валидации (проверяются при `Add<TSystem>`)
+
+- Системы без `Guid` молча не попадают в снапшот.
+- Любая система, объявляющая `Guid`, **обязана** переопределить и `Write`, и `Read` — независимо от лэйаута. Unmanaged fast-path не применяется: инстансы систем хранятся упакованными в `SystemData.System`, фреймворк всегда вызывает хуки. Их отсутствие выбрасывает `StaticEcsException` из `Add`.
+- Дубликат `Guid` внутри одной группы `Systems<TSystemsType>` ассертится в DEBUG.
+
+#### Пример
+
+```csharp
+public class SpawnerSystem : ISystem {
+    private int _nextId;
+    private float _accumulator;
+
+    public Guid? Guid() => new("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    public byte  Version() => 1;
+
+    public void Update() { /* логика спавна */ }
+
+    public void Write(ref BinaryPackWriter writer) {
+        writer.WriteInt(_nextId);
+        writer.WriteFloat(_accumulator);
+    }
+
+    public void Read(ref BinaryPackReader reader, byte version) {
+        _nextId = reader.ReadInt();
+        _accumulator = reader.ReadFloat();
+    }
+}
+```
+
+#### `Systems<TSystemsType>.Create` принимает явный `Guid` группы
+
+```csharp
+GameSys.Create(baseSize: 64);                                                // Guid = typeof(GameSystems).GuidFromAQN()
+GameSys.Create(baseSize: 64, snapshotGuid: new("…stable-pipeline-guid…"));   // явный, переживает переименования namespace-а
+```
+
+Группа регистрируется в реестре снапшотов мира на `Create` и снимается на `Destroy`. `WorldSnapshot` обходит все зарегистрированные группы и пишет по секции на каждую; при загрузке секции с незарегистрированным `Guid` молча пропускаются.
+
+#### Отдельный API
+
+Зеркалирует `Create/LoadEventsSnapshot`. Обходит все зарегистрированные `Systems<TSystemsType>`-группы (вместе с их scoped-ресурсами):
+
+```csharp
+// Сохранить
+byte[] snapshot = W.Serializer.CreateSystemsSnapshot();
+W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
+
+// Загрузить
+W.Serializer.LoadSystemsSnapshot(snapshot);
+W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+```
+
+Каждая секция группы содержит её scoped-ресурсы (singleton + named), затем все системы внутри неё, объявляющие `Guid`.
 
 ___
 

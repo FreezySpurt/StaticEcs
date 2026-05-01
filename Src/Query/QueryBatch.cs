@@ -80,7 +80,7 @@ namespace FFS.Libraries.StaticEcs {
             /// storage is released.
             /// </summary>
             /// <param name="entities">Which entity lifecycle state to destroy (enabled, disabled, or any).</param>
-            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities; Flexible allows free modification.</param>
+            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities that belong to the iteration snapshot (entities created mid-iteration or not matching the filter remain freely mutable); Flexible additionally tolerates entity-level destroy/disable/enable on other snapshot entities.</param>
             /// <param name="clusters">Optional cluster filter. If provided, only entities in these clusters are destroyed.</param>
             /// <param name="withDisabledClusters">If <c>true</c>, also includes entities in disabled (unloaded) clusters.</param>
             [MethodImpl(AggressiveInlining)]
@@ -142,7 +142,7 @@ namespace FFS.Libraries.StaticEcs {
             /// but the entities remain alive (active mask, disabled mask, and versions are preserved).
             /// </summary>
             /// <param name="entities">Which entity lifecycle state to unload (enabled, disabled, or any).</param>
-            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities; Flexible allows free modification.</param>
+            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities that belong to the iteration snapshot (entities created mid-iteration or not matching the filter remain freely mutable); Flexible additionally tolerates entity-level destroy/disable/enable on other snapshot entities.</param>
             /// <param name="clusters">Optional cluster filter. If provided, only entities in these clusters are unloaded.</param>
             /// <param name="withDisabledClusters">If <c>true</c>, also includes entities in disabled (unloaded) clusters.</param>
             [MethodImpl(AggressiveInlining)]
@@ -176,7 +176,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <para>Available with 1–5 type parameters.</para>
             /// </summary>
             /// <param name="entities">Which entity lifecycle state to target.</param>
-            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities; Flexible allows free modification.</param>
+            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities that belong to the iteration snapshot (entities created mid-iteration or not matching the filter remain freely mutable); Flexible additionally tolerates entity-level destroy/disable/enable on other snapshot entities.</param>
             /// <param name="clusters">Optional cluster filter.</param>
             /// <returns>This query instance for chaining.</returns>
             #if NET5_0_OR_GREATER
@@ -312,7 +312,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <para>Available with 1–5 type parameters.</para>
             /// </summary>
             /// <param name="entities">Which entity lifecycle state to target.</param>
-            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities; Flexible allows free modification.</param>
+            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities that belong to the iteration snapshot (entities created mid-iteration or not matching the filter remain freely mutable); Flexible additionally tolerates entity-level destroy/disable/enable on other snapshot entities.</param>
             /// <param name="clusters">Optional cluster filter.</param>
             /// <returns>This query instance for chaining.</returns>
             #if NET5_0_OR_GREATER
@@ -436,7 +436,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <para>Available with 1–5 type parameters.</para>
             /// </summary>
             /// <param name="entities">Which entity lifecycle state to target.</param>
-            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities; Flexible allows free modification.</param>
+            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities that belong to the iteration snapshot (entities created mid-iteration or not matching the filter remain freely mutable); Flexible additionally tolerates entity-level destroy/disable/enable on other snapshot entities.</param>
             /// <param name="clusters">Optional cluster filter.</param>
             /// <returns>This query instance for chaining.</returns>
             #if NET5_0_OR_GREATER
@@ -574,7 +574,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <para>Available with 1–5 type parameters.</para>
             /// </summary>
             /// <param name="entities">Which entity lifecycle state to target.</param>
-            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities; Flexible allows free modification.</param>
+            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities that belong to the iteration snapshot (entities created mid-iteration or not matching the filter remain freely mutable); Flexible additionally tolerates entity-level destroy/disable/enable on other snapshot entities.</param>
             /// <param name="clusters">Optional cluster filter.</param>
             /// <returns>This query instance for chaining.</returns>
             #if NET5_0_OR_GREATER
@@ -584,7 +584,7 @@ namespace FFS.Libraries.StaticEcs {
             public WorldQuery<TFilter> BatchDisable<T1>(EntityStatusType entities = EntityStatusType.Enabled,
                                                         QueryMode mode = QueryMode.Strict,
                                                         ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchDisable(queryData, firstGlobalBlockIdx);
@@ -601,7 +601,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public WorldQuery<TFilter> BatchDisable<T1>(EntityStatusType entities, ReadOnlySpan<uint> chunks,
                                                         QueryMode mode = QueryMode.Strict)
-                where T1 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, chunks, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchDisable(queryData, firstGlobalBlockIdx);
@@ -619,8 +619,8 @@ namespace FFS.Libraries.StaticEcs {
             public WorldQuery<TFilter> BatchDisable<T1, T2>(EntityStatusType entities = EntityStatusType.Enabled,
                                                             QueryMode mode = QueryMode.Strict,
                                                             ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchDisable(queryData, firstGlobalBlockIdx);
@@ -639,9 +639,9 @@ namespace FFS.Libraries.StaticEcs {
             public WorldQuery<TFilter> BatchDisable<T1, T2, T3>(EntityStatusType entities = EntityStatusType.Enabled,
                                                                 QueryMode mode = QueryMode.Strict,
                                                                 ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchDisable(queryData, firstGlobalBlockIdx);
@@ -661,10 +661,10 @@ namespace FFS.Libraries.StaticEcs {
             public WorldQuery<TFilter> BatchDisable<T1, T2, T3, T4>(EntityStatusType entities = EntityStatusType.Enabled,
                                                                     QueryMode mode = QueryMode.Strict,
                                                                     ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent
-                where T4 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable
+                where T4 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchDisable(queryData, firstGlobalBlockIdx);
@@ -686,11 +686,11 @@ namespace FFS.Libraries.StaticEcs {
                                                                         QueryMode mode = QueryMode.Strict,
 
                                                                         ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent
-                where T4 : struct, IComponent
-                where T5 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable
+                where T4 : struct, IComponent, IDisableable
+                where T5 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchDisable(queryData, firstGlobalBlockIdx);
@@ -711,7 +711,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <para>Available with 1–5 type parameters.</para>
             /// </summary>
             /// <param name="entities">Which entity lifecycle state to target.</param>
-            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities; Flexible allows free modification.</param>
+            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities that belong to the iteration snapshot (entities created mid-iteration or not matching the filter remain freely mutable); Flexible additionally tolerates entity-level destroy/disable/enable on other snapshot entities.</param>
             /// <param name="clusters">Optional cluster filter.</param>
             /// <returns>This query instance for chaining.</returns>
             #if NET5_0_OR_GREATER
@@ -722,7 +722,7 @@ namespace FFS.Libraries.StaticEcs {
                                                        QueryMode mode = QueryMode.Strict,
 
                                                        ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchEnable(queryData, firstGlobalBlockIdx);
@@ -739,7 +739,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public WorldQuery<TFilter> BatchEnable<T1>(EntityStatusType entities, ReadOnlySpan<uint> chunks,
                                                        QueryMode mode = QueryMode.Strict)
-                where T1 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, chunks, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchEnable(queryData, firstGlobalBlockIdx);
@@ -757,8 +757,8 @@ namespace FFS.Libraries.StaticEcs {
             public WorldQuery<TFilter> BatchEnable<T1, T2>(EntityStatusType entities = EntityStatusType.Enabled,
                                                            QueryMode mode = QueryMode.Strict,
                                                            ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchEnable(queryData, firstGlobalBlockIdx);
@@ -777,9 +777,9 @@ namespace FFS.Libraries.StaticEcs {
             public WorldQuery<TFilter> BatchEnable<T1, T2, T3>(EntityStatusType entities = EntityStatusType.Enabled,
                                                                QueryMode mode = QueryMode.Strict,
                                                                ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchEnable(queryData, firstGlobalBlockIdx);
@@ -800,10 +800,10 @@ namespace FFS.Libraries.StaticEcs {
                                                                    QueryMode mode = QueryMode.Strict,
 
                                                                    ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent
-                where T4 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable
+                where T4 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchEnable(queryData, firstGlobalBlockIdx);
@@ -825,11 +825,11 @@ namespace FFS.Libraries.StaticEcs {
                                                                        QueryMode mode = QueryMode.Strict,
 
                                                                        ReadOnlySpan<ushort> clusters = default)
-                where T1 : struct, IComponent
-                where T2 : struct, IComponent
-                where T3 : struct, IComponent
-                where T4 : struct, IComponent
-                where T5 : struct, IComponent {
+                where T1 : struct, IComponent, IDisableable
+                where T2 : struct, IComponent, IDisableable
+                where T3 : struct, IComponent, IDisableable
+                where T4 : struct, IComponent, IDisableable
+                where T5 : struct, IComponent, IDisableable {
                 var strict = mode == QueryMode.Strict;
                 if (Prepare(Filter, clusters, entities, strict, out var queryData, out var firstGlobalBlockIdx)) {
                     Components<T1>.Instance.BatchEnable(queryData, firstGlobalBlockIdx);
@@ -851,7 +851,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <para>Available with 1–5 type parameters.</para>
             /// </summary>
             /// <param name="entities">Which entity lifecycle state to target.</param>
-            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities; Flexible allows free modification.</param>
+            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities that belong to the iteration snapshot (entities created mid-iteration or not matching the filter remain freely mutable); Flexible additionally tolerates entity-level destroy/disable/enable on other snapshot entities.</param>
             /// <param name="clusters">Optional cluster filter.</param>
             /// <returns>This query instance for chaining.</returns>
             #if NET5_0_OR_GREATER
@@ -981,7 +981,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <para>Available with 1–5 type parameters.</para>
             /// </summary>
             /// <param name="entities">Which entity lifecycle state to target.</param>
-            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities; Flexible allows free modification.</param>
+            /// <param name="mode">Query mode: Strict (default) blocks hooks from modifying filtered types on non-current entities that belong to the iteration snapshot (entities created mid-iteration or not matching the filter remain freely mutable); Flexible additionally tolerates entity-level destroy/disable/enable on other snapshot entities.</param>
             /// <param name="clusters">Optional cluster filter.</param>
             /// <returns>This query instance for chaining.</returns>
             #if NET5_0_OR_GREATER

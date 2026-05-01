@@ -8,7 +8,7 @@ nav_order: 12
 Запросы — механизм поиска сущностей и их компонентов в мире
 - Все запросы не требуют кеширования, аллоцируются на стеке и могут использоваться «на лету»
 - Поддерживают фильтрацию по компонентам, тегам, статусу сущности и кластерам
-- Два режима итерации: `Strict` (по умолчанию, быстрее) и `Flexible` (допускает модификацию фильтруемых типов у других сущностей)
+- Два режима итерации: `Strict` (по умолчанию, быстрее) и `Flexible` (дополнительно разрешает уничтожение / отключение / включение других сущностей из снимка итерации). В обоих режимах сущности вне снимка — созданные внутри итерации или не прошедшие фильтр — под ограничения не попадают.
 
 ___
 
@@ -54,6 +54,12 @@ AnyOnlyDisabled<Position, Velocity> anyDis = default;
 
 // AnyWithDisabled — хотя бы один (любое состояние)
 AnyWithDisabled<Position, Velocity> anyAll = default;
+
+// Замечание: все пять *Disabled-семейств (AllOnlyDisabled, AllWithDisabled,
+// NoneWithDisabled, AnyOnlyDisabled, AnyWithDisabled) имеют констрейнт
+// `struct, IComponent, IDisableable` на параметры типа. Компоненты без
+// маркера IDisableable использовать здесь нельзя — ошибка компиляции.
+// См. features/component.md#enabledisable.
 
 // Результаты для сущностей выше:
 // All<Position, Velocity>              → 1, 3
@@ -108,7 +114,7 @@ AnyDeleted<Position, Velocity> anyDeleted = default;
 NoneDeleted<Position> noneDeleted = default;
 
 // AllChanged — ВСЕ указанные компоненты были изменены с последнего ClearChangedTracking (от 1 до 5 типов)
-// Требует ComponentTypeConfig.TrackChanged = true
+// Требует, чтобы тип компонента реализовывал ITrackableChanged
 AllChanged<Position> changed = default;
 
 // AnyChanged — ХОТЯ БЫ ОДИН был изменён (от 2 до 5 типов)
@@ -248,9 +254,10 @@ foreach (var entity in W.Query(filter).Entities()) {
     entity.Ref<Position>().Value += entity.Read<Velocity>().Value;
 }
 
-// Flexible режим — позволяет модифицировать фильтруемые типы у других сущностей
+// Flexible режим — разрешает уничтожение / отключение / включение других сущностей из снимка во время итерации
 foreach (var entity in W.Query<All<Position>>().EntitiesFlexible()) {
-    // ...
+    // безопасно: another.Destroy(), another.Disable(), another.Enable()
+    // по-прежнему запрещено (ассерт в DEBUG): another.Delete<Position>(), another.Disable<Position>() и т.п.
 }
 
 // Найти первую подходящую сущность
@@ -262,6 +269,21 @@ if (W.Query<All<Position>>().Any(out var found)) {
 if (W.Query<All<Position>>().One(out var single)) {
     // single — единственная сущность с Position
 }
+
+// Проверка, входит ли заданная сущность в результат запроса
+//   - проверяет lifecycle-состояние сущности (по умолчанию только Enabled)
+//   - проверяет принадлежность переданным кластерам (если указаны)
+//   - применяет фильтр запроса через Entity.IsMatch
+if (W.Query<All<Position, Velocity>>().Contains(entity)) {
+    // entity активна и проходит фильтр
+}
+
+// С опциональными параметрами
+W.Query<All<Position>>().Contains(
+    entity,
+    entities: EntityStatusType.Any,                 // Enabled (по умолчанию), Disabled, Any
+    clusters: stackalloc ushort[] { 1, 2 }          // пусто = любой кластер
+);
 
 // Подсчёт количества сущностей (полный обход)
 int count = W.Query<All<Position>>().EntitiesCount();
@@ -675,21 +697,37 @@ ___
 
 Для методов `For`, `Search`, `Entities`:
 
-- **`QueryMode.Strict`** (по умолчанию) — запрещает модификацию фильтруемых типов компонентов/тегов у **других** сущностей во время итерации. Работает быстрее.
-- **`QueryMode.Flexible`** — позволяет модификацию фильтруемых типов у других сущностей, корректно контролирует текущую итерацию.
+- **`QueryMode.Strict`** (по умолчанию) — DEBUG-ассерт точечный: у **не-текущих сущностей, входящих в снимок итерации**, блокирует только те операции с типами `T` из фильтра, которые могут снять кэшированный матч, а также entity-уровневые `Destroy` / `Disable` (при итерации `Enabled`) / `Enable` (при итерации `Disabled`):
+
+| Фильтр              | Блокируется на не-текущей сущности из снимка |
+|---------------------|----------------------------------------------|
+| `All<T>`             | `Delete<T>`, `Disable<T>`                    |
+| `AllOnlyDisabled<T>` | `Delete<T>`, `Enable<T>`                     |
+| `AllWithDisabled<T>` | `Delete<T>`                                  |
+| `None<T>`            | `Add<T>`, `Set<T>`, `Enable<T>`              |
+
+Операции над **типами вне фильтра**, над сущностями **вне снимка** (созданными внутри обхода или не прошедшими фильтр) и над **текущей сущностью** не блокируются. Strict — самый быстрый режим (использует fast-path для полностью заполненных блоков).
+
+- **`QueryMode.Flexible`** — те же блокеры по фильтруемым типам, что и в Strict, но дополнительно **разрешает** entity-уровневые `Destroy` / `Disable` / `Enable` других сущностей из снимка (такие сущности корректно исключаются из оставшейся итерации через обновление кэшированных битмасок). Медленнее — перечитывает кэшированную битмаску на каждой сущности.
 
 ```csharp
 var anotherEntity = W.NewEntity<Default>();
 anotherEntity.Add<Position>();
 
-// Strict: модификация Position у другой сущности — ошибка в DEBUG
+// Strict: уничтожение другой сущности из снимка во время итерации — ошибка в DEBUG
 foreach (var entity in W.Query<All<Position>>().Entities()) {
-    anotherEntity.Delete<Position>(); // ОШИБКА в DEBUG
+    anotherEntity.Destroy(); // ОШИБКА в DEBUG (anotherEntity входит в снимок)
+
+    // OK — сущности, созданные внутри итерации, в снимок НЕ входят
+    var fresh = W.NewEntity<Default>();
+    fresh.Add<Position>();
+    fresh.Set(new Velocity { ... });
 }
 
-// Flexible: модификация допустима, итерация стабильна
+// Flexible: destroy/disable/enable другой сущности из снимка разрешены
 foreach (var entity in W.Query<All<Position>>().EntitiesFlexible()) {
-    anotherEntity.Delete<Position>(); // OK — anotherEntity корректно исключена
+    anotherEntity.Destroy();            // OK — исключена из оставшейся итерации
+    // anotherEntity.Delete<Position>(); // по-прежнему ОШИБКА в DEBUG — мутация фильтруемого типа у другой сущности из снимка
 }
 
 // Для For/Search через параметр
@@ -699,4 +737,4 @@ W.Query().For(static (ref Position pos) => {
 ```
 
 {: .noteru }
-`Flexible` полезен для иерархий или кэшей, когда из компонентов одних сущностей модифицируются другие. В остальных случаях предпочтителен `Strict` по соображениям производительности.
+`Flexible` полезен, когда логика итерации уничтожает или переключает (`Disable`/`Enable`) другие сущности из снимка — например, прорежает дочерние сущности при обходе родителей или массово отключает сущности под действием AoE-эффекта. Он **не** снимает блокеры по фильтруемым типам — такие изменения необходимо отложить (например, собрать в буфер и применить после `foreach`). В остальных случаях предпочтителен `Strict` по соображениям производительности. Создание новых сущностей и их настройка внутри тела цикла разрешены в обоих режимах — новые сущности не входят в снимок итерации.

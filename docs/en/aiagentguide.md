@@ -51,7 +51,8 @@ public abstract class GameSys : W.Systems<GameSystems> { }
 - `Ref<T>()` returns a ref to the component. Assumes component exists — check with `Has<T>()` first if uncertain.
 - For read-only components use `Read<T>()` (returns `ref readonly`) instead of `Ref<T>()`, and `in` instead of `ref` in query delegates.
 - Query filter types: `All<>` (require), `None<>` (exclude), `Any<>` (at least one). These filters work with both components and tags. Combine with `And<Filter1, Filter2>` (all must match) or `Or<Filter1, Filter2>` (any must match).
-- Default query mode is Strict — do NOT modify filtered component/tag types on OTHER entities during iteration. Use `EntitiesFlexible()` if needed.
+- `Disable<T>()`/`Enable<T>()`/`HasDisabled<T>()`/`HasEnabled<T>()` and `*Disabled` filters (`AllOnlyDisabled`, `AllWithDisabled`, `NoneWithDisabled`, `AnyOnlyDisabled`, `AnyWithDisabled`) require `T : struct, IComponent, IDisableable` — opt-in marker. Components without it cannot be disabled (compile error). Built-in `Multi<T>`, `Link<T>`, `Links<T>` already implement `IDisableable`.
+- Default query mode is Strict. Restrictions apply only to other entities **belonging to the iteration snapshot** (the bitmask of filter-matching entities fixed at iteration start). Modifying filtered component/tag types on other snapshot entities is forbidden in BOTH Strict and Flexible (asserts in DEBUG). Entities outside the snapshot — created mid-iteration or not matching the filter — are NOT blocked: create new entities and configure them inline freely. Use `EntitiesFlexible()` only when you need to `Destroy`/`Disable`/`Enable` other snapshot entities during iteration — that is the only extra freedom it gives.
 - During `ForParallel`, only modify the current entity. No structural changes.
 - Systems: `ISystem` with `Init()`, `Update()`, `UpdateIsActive()`, `Destroy()`. All methods have default empty implementations.
 

@@ -120,21 +120,84 @@ public struct Foo : IComponent { }
 ### HasOnDelete vs DataLifecycle
 OnDelete hook and DataLifecycle (reset to `DefaultValue`) are mutually exclusive cleanup paths. If a component has an OnDelete hook, the hook handles cleanup — the data is NOT reset. DataLifecycle reset only applies to components without OnDelete. When `noDataLifecycle: true` in config, no initialization or cleanup is performed by the framework.
 
+### Disable/Enable on a non-`IDisableable` component
+`Entity.Disable<T>()` / `Enable<T>()` / `HasDisabled<T>()` / `HasEnabled<T>()` and the `*Disabled` query filters all constrain `T : struct, IComponent, IDisableable`. Calling them on a component without the marker is a **compile-time error**, not a runtime assert. If your code used to compile in 2.1.x and now fails — add `IDisableable` to the affected component's declaration. See [migration to 2.2.0](migrationguide.md).
+
 ___
 
 ## Query Errors
 
-### Strict mode violations
-In the default Strict query mode, modifying filtered component/tag types on OTHER entities during iteration is forbidden. This includes Add/Delete/Enable/Disable of filtered types on entities other than the current one.
+### Iteration snapshot vs other entities
+Strict / Flexible restrictions apply only to **other entities that belong to the iteration snapshot** — the bitmask of entities matching the filter at the moment iteration starts. Entities outside the snapshot are **not blocked**: they can be freely created, configured, mutated, or destroyed inside the loop. This includes:
+- entities created during iteration (always outside the snapshot, since the snapshot was fixed before they existed),
+- entities that did not pass the filter (different components, wrong entity type, etc.).
+
 ```csharp
-// WRONG in Strict mode:
+// OK in Strict — fresh entity is not in the snapshot
 foreach (var e in W.Query<All<Position>>().Entities()) {
-    otherEntity.Delete<Position>(); // Modifies filtered type on another entity!
+    var fresh = W.NewEntity<Default>();
+    fresh.Add<Position>();
+    fresh.Set(new Velocity { ... });
 }
 
-// CORRECT: use Flexible mode
+// OK in Strict — `unrelated` does not match `All<Position>`
+foreach (var e in W.Query<All<Position>>().Entities()) {
+    unrelated.Add<Tag>(); // no Position, not in snapshot
+}
+```
+
+### Removing the snapshot match from a non-current entity
+Strict's assert (and Flexible's — Flexible does NOT lift this restriction) is precise. It fires only on operations that could remove the cached snapshot match from a non-current entity. Per filter type `T`:
+
+| Filter               | Blocked on non-current snapshot entity |
+|----------------------|----------------------------------------|
+| `All<T>`             | `Delete<T>`, `Disable<T>`              |
+| `AllOnlyDisabled<T>` | `Delete<T>`, `Enable<T>`               |
+| `AllWithDisabled<T>` | `Delete<T>`                            |
+| `None<T>`            | `Add<T>`, `Set<T>`, `Enable<T>`        |
+
+Operations on **types not in the filter** are not blocked. Operations on entities **outside the snapshot** (created mid-iteration, or whose bit was 0 in the cached mask) are not blocked. The current entity may be mutated freely.
+
+```csharp
+// WRONG — Position is in the filter, otherEntity is in the snapshot:
+W.Query<All<Position>>().For((W.Entity e) => {
+    otherEntity.Delete<Position>(); // asserts in DEBUG
+});
+W.Query<All<Position>>().For((W.Entity e) => {
+    otherEntity.Delete<Position>(); // also asserts in Flexible
+}, queryMode: QueryMode.Flexible);
+
+// CORRECT — mark with a tag during the loop, batch-delete in a single pass after:
+W.Query<All<Position>>().For((W.Entity e) => {
+    if (ShouldStrip(otherEntity)) otherEntity.Set<Marked>(); // Marked isn't in the filter — never blocked
+});
+W.Query<All<Position, Marked>>().BatchDelete<Position, Marked>();
+
+// CORRECT — mutating a type that isn't in the filter is allowed:
+W.Query<All<Position>>().For((W.Entity e) => {
+    otherEntity.Delete<Velocity>(); // OK: Velocity not in the filter, no blocker
+});
+
+// CORRECT — mutating an entity outside the snapshot (newly created, or non-matching) is allowed:
+W.Query<All<Position>>().For((W.Entity e) => {
+    var fresh = W.NewEntity<Default>();   // outside the snapshot by definition
+    fresh.Set(new Position { ... });      // OK
+});
+```
+
+### Entity-level operations on other snapshot entities — Flexible only
+Destroying, disabling, or enabling **another snapshot** entity during iteration is forbidden in Strict (asserts in DEBUG) but allowed in Flexible, where the cached bitmask is updated so the affected entity is skipped for the rest of the loop.
+```csharp
+// WRONG in Strict:
+foreach (var e in W.Query<All<Position>>().Entities()) {
+    otherEntity.Destroy(); // asserts in DEBUG (otherEntity is in the snapshot)
+}
+
+// CORRECT in Flexible:
 foreach (var e in W.Query<All<Position>>().EntitiesFlexible()) {
-    otherEntity.Delete<Position>(); // OK in Flexible mode
+    otherEntity.Destroy();  // OK — excluded from the remaining iteration
+    otherEntity.Disable();  // OK
+    otherEntity.Enable();   // OK
 }
 ```
 
@@ -142,8 +205,24 @@ foreach (var e in W.Query<All<Position>>().EntitiesFlexible()) {
 During `ForParallel`, only modify the CURRENT entity's data. Do not create/destroy entities, modify other entities, or perform structural changes.
 
 ### Unnecessary Flexible mode
-Flexible mode re-checks bitmasks on every entity, making it significantly slower than Strict. Only use Flexible when you actually need to modify filtered types on other entities during iteration.
+Flexible mode re-reads the cached bitmask on every step, making it slower than Strict. Use Flexible only when you actually need to `Destroy` / `Disable` / `Enable` other snapshot entities during iteration — that is the only extra freedom it provides. Creating new entities inside the loop and configuring them does NOT require Flexible: new entities are not part of the snapshot in either mode.
 
+### Duplicating delegate components in the `Query<>` filter
+The `For<T0, ...>` overloads on `WorldQuery<TFilter>` automatically add the components from the delegate signature (`ref T0`, `in T0`) to the iteration filter. Listing them again inside `All<>` is wrong — it duplicates the type and is a clear sign you are fighting the API:
+```csharp
+// WRONG — Position and Velocity repeated in All<>
+W.Query<All<Position, Velocity>>().For(static (ref Position p, ref Velocity v) => { ... });
+
+// CORRECT — components in the delegate form the filter on their own
+W.Query().For(static (ref Position p, ref Velocity v) => { ... });
+
+// CORRECT — Query<> only carries extra filters (tags, None, EntityIs, etc.)
+W.Query<None<Stunned>>().For(static (W.Entity e, ref Position p, ref Velocity v) => { ... });
+
+// CORRECT — entity-only delegate: no component in the signature,
+// so the filter must live in Query<All<...>>
+W.Query<All<Position>>().For(static (W.Entity e) => { ... });
+```
 ___
 
 ## Registration Errors

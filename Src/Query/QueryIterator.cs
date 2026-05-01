@@ -17,10 +17,18 @@ namespace FFS.Libraries.StaticEcs {
     /// Flexible (re-checking) entity iterator returned by
     /// <see cref="World{TWorld}.WorldQuery{TFilter}.EntitiesFlexible"/>.
     /// <para>
-    /// Unlike <see cref="QueryStrictIterator{TWorld,TFilter}"/>, this iterator re-evaluates
-    /// the entity bitmask on every block transition, allowing safe iteration even when the
-    /// filtered component or tag types are modified on <b>other</b> entities during the loop.
-    /// This makes it slightly slower than the strict variant but tolerant of concurrent mutations.
+    /// Unlike <see cref="QueryStrictIterator{TWorld,TFilter}"/>, this iterator re-reads the cached
+    /// block bitmask on every step, allowing <see cref="World{TWorld}.Entity.Destroy"/> and entity
+    /// status changes (Disable/Enable) to be performed on <b>other snapshot</b> entities during the
+    /// loop — such entities are excluded from the remaining iteration. This is slightly slower than
+    /// the strict variant but tolerant of entity-level mutations on the iterated set.
+    /// </para>
+    /// <para>
+    /// Modifying filtered component/tag types on other snapshot entities (Add/Delete/Enable/Disable
+    /// of the components the query filters on) remains forbidden in flexible mode as well and is
+    /// asserted in debug builds, same as in strict mode. As in strict mode, entities outside the
+    /// iteration snapshot (created mid-iteration or not matching the filter) are not blocked and
+    /// may be freely created, configured, mutated, or destroyed.
     /// </para>
     /// <para>
     /// This is a <c>ref struct</c> — it cannot be boxed, stored in fields, or used across
@@ -53,7 +61,6 @@ namespace FFS.Libraries.StaticEcs {
         public QueryFlexibleIterator(ReadOnlySpan<ushort> clusters, TFilter filter, EntityStatusType entities) {
             #if FFS_ECS_DEBUG
             World<TWorld>.AssertNotNestedParallelQuery(World<TWorld>.WorldTypeName);
-            filter.Assert<TWorld>();
             #endif
 
             _entities = entities;
@@ -68,7 +75,6 @@ namespace FFS.Libraries.StaticEcs {
         internal QueryFlexibleIterator(ReadOnlySpan<uint> chunks, TFilter filter, EntityStatusType entities) {
             #if FFS_ECS_DEBUG
             World<TWorld>.AssertNotNestedParallelQuery(World<TWorld>.WorldTypeName);
-            filter.Assert<TWorld>();
             #endif
 
             _entities = entities;
@@ -146,11 +152,16 @@ namespace FFS.Libraries.StaticEcs {
     /// <see cref="World{TWorld}.WorldQuery{TFilter}.Entities"/>.
     /// <para>
     /// The strict iterator assumes that the filtered component and tag types are <b>not</b>
-    /// modified on other entities during iteration. This allows it to skip per-block bitmask
-    /// re-evaluation, making it faster than <see cref="QueryFlexibleIterator{TWorld,TFilter}"/>.
-    /// Additionally, it uses a sequential bit-scan optimization: when the next entity is
-    /// adjacent in the bitmask, it advances with a single shift + increment instead of a
-    /// full trailing-zero-count scan.
+    /// modified on other entities that belong to the iteration snapshot. This allows it to skip
+    /// per-block bitmask re-evaluation, making it faster than
+    /// <see cref="QueryFlexibleIterator{TWorld,TFilter}"/>. Additionally, it uses a sequential
+    /// bit-scan optimization: when the next entity is adjacent in the bitmask, it advances with a
+    /// single shift + increment instead of a full trailing-zero-count scan.
+    /// </para>
+    /// <para>
+    /// Entities created during iteration and entities that did not pass the filter are not part
+    /// of the iteration snapshot and remain freely mutable inside the loop body — strict-mode
+    /// asserts only fire on snapshot entities other than the current one.
     /// </para>
     /// <para>
     /// This is a <c>ref struct</c> — it cannot be boxed, stored in fields, or used across
@@ -184,7 +195,6 @@ namespace FFS.Libraries.StaticEcs {
         public QueryStrictIterator(ReadOnlySpan<ushort> clusters, TFilter filter, EntityStatusType entities) {
             #if FFS_ECS_DEBUG
             World<TWorld>.AssertNotNestedParallelQuery(World<TWorld>.WorldTypeName);
-            filter.Assert<TWorld>();
             #endif
 
             _entities = entities;
@@ -201,7 +211,6 @@ namespace FFS.Libraries.StaticEcs {
         internal QueryStrictIterator(ReadOnlySpan<uint> chunks, TFilter filter, EntityStatusType entities) {
             #if FFS_ECS_DEBUG
             World<TWorld>.AssertNotNestedParallelQuery(World<TWorld>.WorldTypeName);
-            filter.Assert<TWorld>();
             #endif
 
             _entities = entities;

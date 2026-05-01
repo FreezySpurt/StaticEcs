@@ -120,21 +120,84 @@ public struct Foo : IComponent { }
 ### HasOnDelete vs DataLifecycle
 Хук OnDelete и DataLifecycle (сброс к `DefaultValue`) — взаимоисключающие пути очистки. Если у компонента есть хук OnDelete, хук отвечает за очистку — данные НЕ сбрасываются. Сброс DataLifecycle применяется только к компонентам без OnDelete. При `noDataLifecycle: true` в конфиге фреймворк не выполняет ни инициализацию, ни очистку.
 
+### Disable/Enable на компоненте без `IDisableable`
+Методы `Entity.Disable<T>()` / `Enable<T>()` / `HasDisabled<T>()` / `HasEnabled<T>()` и фильтры `*Disabled` имеют констрейнт `T : struct, IComponent, IDisableable`. Вызов на типе без маркера — **ошибка компиляции**, не runtime-ассерт. Если код собирался в 2.1.x и теперь падает на компиляции — добавьте `IDisableable` к декларации затронутого компонента. См. [миграцию на 2.2.0](migrationguide.md).
+
 ___
 
 ## Ошибки запросов
 
-### Нарушение Strict режима
-В стандартном режиме Strict модификация фильтруемых типов компонентов/тегов на ДРУГИХ сущностях во время итерации запрещена.
+### Снимок итерации vs другие сущности
+Ограничения Strict / Flexible применяются только к **другим сущностям, входящим в снимок итерации** — битмаску сущностей, прошедших фильтр на момент старта обхода. Сущности вне снимка **не блокируются**: их можно свободно создавать, настраивать, изменять и уничтожать внутри тела цикла. Сюда входят:
+- сущности, созданные во время итерации (всегда вне снимка — снимок зафиксирован до их появления);
+- сущности, не прошедшие фильтр (другие компоненты, неподходящий тип сущности и т. п.).
+
 ```csharp
-// НЕПРАВИЛЬНО в Strict режиме:
+// OK в Strict — новая сущность не входит в снимок
 foreach (var e in W.Query<All<Position>>().Entities()) {
-    otherEntity.Delete<Position>(); // Модифицирует фильтруемый тип у другой сущности!
+    var fresh = W.NewEntity<Default>();
+    fresh.Add<Position>();
+    fresh.Set(new Velocity { ... });
 }
 
-// ПРАВИЛЬНО: используйте Flexible режим
+// OK в Strict — `unrelated` не подходит под `All<Position>`
+foreach (var e in W.Query<All<Position>>().Entities()) {
+    unrelated.Add<Tag>(); // нет Position, в снимок не входит
+}
+```
+
+### Снятие матча с не-текущей сущности из снимка
+Ассерт Strict (и Flexible — он это ограничение НЕ снимает) — точечный. Он срабатывает только на операциях, способных снять матч с не-текущей сущности из снимка. Конкретно по типу `T` из фильтра:
+
+| Фильтр              | Блокируется на не-текущей сущности из снимка |
+|---------------------|----------------------------------------------|
+| `All<T>`             | `Delete<T>`, `Disable<T>`                    |
+| `AllOnlyDisabled<T>` | `Delete<T>`, `Enable<T>`                     |
+| `AllWithDisabled<T>` | `Delete<T>`                                  |
+| `None<T>`            | `Add<T>`, `Set<T>`, `Enable<T>`              |
+
+Операции над **типами вне фильтра** не блокируются. Операции над сущностями **вне снимка** (созданными внутри итерации или с битом 0 в кэшированной маске) не блокируются. Текущую сущность мутировать можно как угодно.
+
+```csharp
+// НЕПРАВИЛЬНО — Position в фильтре, otherEntity в снимке:
+W.Query<All<Position>>().For((W.Entity e) => {
+    otherEntity.Delete<Position>(); // ассерт в DEBUG
+});
+W.Query<All<Position>>().For((W.Entity e) => {
+    otherEntity.Delete<Position>(); // ассерт в DEBUG и в Flexible
+}, queryMode: QueryMode.Flexible);
+
+// ПРАВИЛЬНО — пометьте тегом в цикле, удалите одним batch-проходом после:
+W.Query<All<Position>>().For((W.Entity e) => {
+    if (ShouldStrip(otherEntity)) otherEntity.Set<Marked>(); // Marked не в фильтре — никогда не блокируется
+});
+W.Query<All<Position, Marked>>().BatchDelete<Position, Marked>();
+
+// ПРАВИЛЬНО — мутация типа, не входящего в фильтр, разрешена:
+W.Query<All<Position>>().For((W.Entity e) => {
+    otherEntity.Delete<Velocity>(); // OK: Velocity в фильтре нет, никаких блокеров
+});
+
+// ПРАВИЛЬНО — мутация на сущности вне снимка (новая, либо не прошла фильтр) разрешена:
+W.Query<All<Position>>().For((W.Entity e) => {
+    var fresh = W.NewEntity<Default>();   // вне снимка по определению
+    fresh.Set(new Position { ... });      // OK
+});
+```
+
+### Entity-уровневые операции на других сущностях из снимка — только Flexible
+Уничтожение, отключение или включение **другой сущности из снимка** во время итерации запрещено в Strict (ассерт в DEBUG), но разрешено в Flexible: кэшированная битмаска обновляется, и такая сущность исключается из оставшейся итерации.
+```csharp
+// НЕПРАВИЛЬНО в Strict:
+foreach (var e in W.Query<All<Position>>().Entities()) {
+    otherEntity.Destroy(); // ассерт в DEBUG (otherEntity в снимке)
+}
+
+// ПРАВИЛЬНО в Flexible:
 foreach (var e in W.Query<All<Position>>().EntitiesFlexible()) {
-    otherEntity.Delete<Position>(); // OK в Flexible режиме
+    otherEntity.Destroy();  // OK — исключена из оставшейся итерации
+    otherEntity.Disable();  // OK
+    otherEntity.Enable();   // OK
 }
 ```
 
@@ -142,8 +205,24 @@ foreach (var e in W.Query<All<Position>>().EntitiesFlexible()) {
 Во время `ForParallel` модифицируйте только данные ТЕКУЩЕЙ сущности. Не создавайте/уничтожайте сущности, не модифицируйте другие сущности.
 
 ### Ненужный Flexible режим
-Flexible режим перепроверяет битовые маски на каждой сущности, что значительно медленнее Strict. Используйте Flexible только когда действительно нужно модифицировать фильтруемые типы у других сущностей.
+Flexible перечитывает кэшированную битмаску на каждом шаге, что медленнее Strict. Используйте Flexible только когда действительно нужно `Destroy` / `Disable` / `Enable` других сущностей из снимка во время итерации — это единственная дополнительная свобода, которую он даёт. Создание новых сущностей и их настройка внутри тела цикла Flexible НЕ требуют: новые сущности не входят в снимок ни в одном из режимов.
 
+### Дублирование компонентов делегата в `Query<>`-фильтре
+Перегрузки `For<T0, ...>` на `WorldQuery<TFilter>` сами добавляют компоненты из сигнатуры делегата (`ref T0`, `in T0`) в фильтр итерации. Дополнительно перечислять их в `All<>` неверно — это лишнее дублирование, и явный признак, что вы боретесь с API:
+```csharp
+// НЕПРАВИЛЬНО — Position и Velocity повторены в All<>
+W.Query<All<Position, Velocity>>().For(static (ref Position p, ref Velocity v) => { ... });
+
+// ПРАВИЛЬНО — компоненты из делегата формируют фильтр сами
+W.Query().For(static (ref Position p, ref Velocity v) => { ... });
+
+// ПРАВИЛЬНО — в Query<> идут только дополнительные фильтры (теги, None, EntityIs и т.п.)
+W.Query<None<Stunned>>().For(static (W.Entity e, ref Position p, ref Velocity v) => { ... });
+
+// ПРАВИЛЬНО — entity-only делегат: компонента в сигнатуре нет, поэтому
+// фильтр обязан быть в Query<All<...>>
+W.Query<All<Position>>().For(static (W.Entity e) => { ... });
+```
 ___
 
 ## Ошибки регистрации

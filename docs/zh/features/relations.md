@@ -59,6 +59,9 @@ ___
 
 单链接组件 — `EntityGID`（8 字节）的包装器。
 
+{: .notezh }
+`Link<T>` 和 `Links<T>` 内置实现了 `IDisableable` — `entity.Disable<Link<Parent>>()` / `Enable<Link<Parent>>()` 无需在你的 link 类型上做任何额外声明即可使用。详见 [Component / Enable-Disable](component.md#enabledisable)。
+
 ```csharp
 // 属性
 EntityGID value = link.Value;    // 目标实体的 GID（只读）

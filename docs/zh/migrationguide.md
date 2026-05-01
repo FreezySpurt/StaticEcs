@@ -4,6 +4,81 @@ parent: ZH
 nav_order: 5
 ---
 
+# 从 2.1.x 迁移到 2.2.0
+
+## 资源现在需要 `IResource`
+
+每种资源类型 — 单例（`Resource<T>` / `World<TWorld>.SetResource<T>` / `Systems<TS>.SetResource<T>`）和命名（`NamedResource<T>` / 带 key 的重载）— 现在必须实现新的标记接口 `IResource`。否则所有资源 API 调用点编译失败。
+
+```csharp
+// 之前
+public class GameConfig { public float Gravity; }
+
+// 之后
+public class GameConfig : IResource { public float Gravity; }
+```
+
+Type-erased `WorldHandle` API 也收紧：`GetResource(Type)` / `GetResource(string)` 现在返回 `IResource` 而非 `object`，`SetResource(Type, ..., bool)` / `SetResource(string, ..., bool)` 接受 `IResource` 而非 `object`。已经传递实现了 `IResource` 类型值的调用点无需更改即可编译；松散的 `object` 代码需要重新类型化。
+
+## Disable/Enable 通过 `IDisableable` 改为 opt-in
+
+在 2.1.x 中，每个 `IComponent` 都会无条件分配每组件的 disabled 位掩码（每段内存 4 ulong），并对任何组件类型暴露 `entity.Disable<T>()`/`Enable<T>()`/`HasDisabled<T>()`/`HasEnabled<T>()` 以及 `*Disabled` 查询过滤器。在 2.2.0 中，这些功能改为通过新的标记接口 `IDisableable` 显式启用。
+
+**Breaking change**：任何使用 `Disable<T>()`/`Enable<T>()` 切换、用 `*Disabled` 过滤器查询或用 `HasDisabled<T>()`/`HasEnabled<T>()` 检查的组件，现在必须声明 `IDisableable`。否则相关调用点编译失败。
+
+```csharp
+// 之前
+public struct Health : IComponent { public float Value; }
+
+// 之后（仅当此类型确实使用 Disable/Enable 或 *Disabled 过滤器时）
+public struct Health : IComponent, IDisableable { public float Value; }
+```
+
+实体上的 `Disable*`/`Enable*`/`Has*Disabled`/`Has*Enabled` 方法、`Components<T>.Disable/Enable/HasDisabled/HasEnabled` 实例方法，以及 `AllOnlyDisabled`/`AllWithDisabled`/`NoneWithDisabled`/`AnyOnlyDisabled`/`AnyWithDisabled` 过滤器，全部约束为 `T : struct, IComponent, IDisableable`。
+
+内置的组件型类型 — `Multi<TValue>`、`Link<TLinkType>`、`Links<TLinkType>` — 已经实现了 `IDisableable`，因此切换关系或 multi-component 的代码无需修改即可继续工作。
+
+### 内存与序列化影响
+
+- 未标记 `IDisableable` 的组件不再分配每组件 mask 段的 disabled 半部分 — `Components<T>.EntitiesMaskSegments` 现在每段分配 4 ulong 而非 8 ulong（这些类型的 mask 内存减少 50%）。
+- per-entity 快照写入器对未标记 `IDisableable` 的类型不再设置组件大小 ushort 的高位 `DisabledBit`。per-chunk 快照对这些类型的每个非空 block 不再写入额外的 disabled mask ulong。
+- 快照格式是**自描述**的：`WriteChunk` 写入类型在写入时刻的 `HasDisable` 标志，`ReadChunk` 从流中读取它。在快照写入与读取之间切换类型的 `IDisableable` 成员资格是安全的 — 来自非 `IDisableable` 类型的旧快照能正确加载到现在标记为 `IDisableable` 的类型（所有实例变为 enabled），反向也安全（从流中消费 disabled mask ulong 但忽略它）。
+
+### 内置 opt-in 标记
+
+- `IDisableable` 在 2.2.0 中加入（本节）。
+- 现有的追踪标记 — `ITrackableAdded`、`ITrackableDeleted`、`ITrackableChanged` — 已经遵循相同的模式；它们没有变化。
+
+___
+
+## Flexible 查询模式的语义收窄
+
+在 2.1.x 中，`QueryMode.Flexible` / `EntitiesFlexible()` 通过内部的 `OnCacheUpdate` 回调机制，在快照中其他实体上发生过滤类型变更时实时修补已缓存的快照位掩码——从而解除了 Strict 下会触发的同一组阻止规则（`All<T>` 下的 `Delete<T>` / `Disable<T>`、`None<T>` 下的 `Add<T>` / `Set<T>` / `Enable<T>` 等）。该机制在 2.2.0 中已被移除。
+
+在 2.2.0 中，Flexible 相对 Strict 唯一保留的额外自由是：对快照中其他实体的实体级 `Destroy`、`Disable`、`Enable`——仍然允许，并通过缓存位掩码更新将这些实体从剩余迭代中正确排除。所有过滤类型阻止规则（即 2.1.x Flexible 通过 `OnCacheUpdate` 解除的那些）现在也对 Flexible 生效——在 DEBUG 下与 Strict 一样断言（按过滤器类型精确判定，参见 [查询 — QueryMode](features/query.md#querymode)）。
+
+简述：**Flexible = Strict + 允许对快照中其他实体的实体级 `Destroy`/`Disable`/`Enable`。**
+
+> 注意：在 2.2.0 中，strict / flexible 断言仅作用于**迭代快照**——即在迭代开始时与过滤器匹配的实体的位掩码。快照之外的实体——在迭代过程中创建的或未通过过滤的——**不会**被阻止。以前必须延迟到循环之后才能执行的对新创建实体的 `entity.Add<T>()` / `entity.Set<T>()`，现在可以直接在循环内进行。
+
+在 Flexible 迭代中对被过滤 `T` 执行 `other.Delete<T>()` / `other.Add<T>()` / `other.Enable<T>()` / `other.Disable<T>()` 的代码必须按以下方式之一重写：
+- 如果与意图相符，则销毁或切换整个实体 —— `other.Destroy()` / `other.Disable()` / `other.Enable()`；
+- 在循环过程中将涉及的实体收集到缓冲区，在 `foreach` 之后再应用组件变更；
+- 将该逻辑拆分为对世界的另一遍遍历。
+
+### 移除的公共 API
+
+- `IQueryFilter.PushQueryData<TWorld>(QueryData)` — 已移除
+- `IQueryFilter.PopQueryData<TWorld>()` — 已移除
+- `IQueryFilter.Assert<TWorld>()` — 已移除
+- `OnCacheUpdate` 委托 — 已移除
+- `QueryData.BatchUpdate` 方法 — 已移除
+- `QueryData.OnCacheUpdate` 字段 — 已移除
+
+另见：[查询 — QueryMode](features/query.md#querymode)、[陷阱](pitfalls.md#查询错误)。
+
+___
+
 # 从 1.2.x 迁移到 2.0.0
 
 2.0.0 版本是框架的完全重构。几乎所有用户代码都需要修改。

@@ -59,6 +59,9 @@ ___
 
 Компонент одиночной связи — обёртка над `EntityGID` (8 байт).
 
+{: .noteru }
+`Link<T>` и `Links<T>` реализуют `IDisableable` встроенно — `entity.Disable<Link<Parent>>()` / `Enable<Link<Parent>>()` работают без дополнительной декларации на ваших link-типах. См. [Component / Enable-Disable](component.md#enabledisable).
+
 ```csharp
 // Свойства
 EntityGID value = link.Value;    // GID целевой сущности (только чтение)

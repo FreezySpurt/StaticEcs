@@ -11,6 +11,7 @@ nav_order: 5
 - Не требует создания массивов или списков внутри компонента — без аллокаций на куче
 - Является реализацией [компонента](component.md), все базовые правила работы аналогичны
 - На базе мультикомпонентов реализованы [отношения](relations.md) сущностей (`Links<T>`)
+- Контейнер `Multi<TValue>` встроенно реализует `IDisableable` — `entity.Disable<Multi<MyValue>>()` / `Enable<Multi<MyValue>>()` работают без дополнительной декларации. См. [Component / Enable-Disable](component.md#enabledisable)
 
 ___
 

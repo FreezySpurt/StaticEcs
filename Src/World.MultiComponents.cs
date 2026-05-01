@@ -82,7 +82,7 @@ namespace FFS.Libraries.StaticEcs {
         #if NET5_0_OR_GREATER
         [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Multi-component metadata is preserved by the registration path.")]
         #endif
-        public struct Multi<TValue> : IComponent, IComponentStrategyOverride, IComponentInternal, IEquatable<Multi<TValue>> where TValue : struct, IMultiComponent {
+        public struct Multi<TValue> : IComponent, IDisableable, IComponentStrategyOverride, IComponentInternal, IEquatable<Multi<TValue>> where TValue : struct, IMultiComponent {
             internal static IPackArrayStrategy<TValue> ElementStrategy;
 
             #if UNITY_2022_1_OR_NEWER
@@ -90,7 +90,11 @@ namespace FFS.Libraries.StaticEcs {
             #endif
             [MethodImpl(NoInlining)]
             internal static void AutoRegister() {
+                #if FFS_ECS_DEBUG
+                if (Components<Multi<TValue>>.instance.IsRegistered) return;
+                #else
                 if (Components<Multi<TValue>>.Instance.IsRegistered) return;
+                #endif
                 ComponentTypeConfig<Multi<TValue>> config = default;
                 IPackArrayStrategy<TValue> elementStrategy = null;
                 if (default(TValue) is IMultiComponentConfig<TValue> cfg) {
@@ -155,7 +159,7 @@ namespace FFS.Libraries.StaticEcs {
                         throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.Indexer ] index out of bounds: {idx}, count: {Count}");
                     }
                     #endif
-                    return ref Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx][Offset + idx];
+                    return ref Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx][Offset + idx];
                 }
             }
 
@@ -164,14 +168,14 @@ namespace FFS.Libraries.StaticEcs {
             /// The span is valid only while the multi-component is not modified (no Add/Remove/Grow).
             /// </summary>
             public readonly Span<TValue> AsSpan {
-                [MethodImpl(AggressiveInlining)] get => new(Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], (int)Offset, Count);
+                [MethodImpl(AggressiveInlining)] get => new(Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], (int)Offset, Count);
             }
             
             /// <summary>
             /// Returns a <see cref="ReadOnlySpan{T}"/> over the currently stored elements.
             /// </summary>
             public readonly ReadOnlySpan<TValue> AsReadOnlySpan {
-                [MethodImpl(AggressiveInlining)] get => new(Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], (int)Offset, Count);
+                [MethodImpl(AggressiveInlining)] get => new(Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], (int)Offset, Count);
             }
 
             /// <summary>
@@ -183,7 +187,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 if (Count == 0) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.First ] empty");
                 #endif
-                return ref Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx][Offset];
+                return ref Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx][Offset];
             }
 
             /// <summary>
@@ -195,7 +199,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 if (Count == 0) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.Last ] empty");
                 #endif
-                return ref Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx][Offset + Count - 1];
+                return ref Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx][Offset + Count - 1];
             }
 
             #region ADD
@@ -209,7 +213,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertNotBlockedByIteration();
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                 if (Count >= SegmentAllocator.MinSlotCapacity << Level) {
                     Grow(ref storage);
                 }
@@ -225,7 +229,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertNotBlockedByIteration();
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (Count + 1 >= cap) {
                     EnsureCapacityInternal(ref storage, (ushort)(Count + 2));
@@ -245,7 +249,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertNotBlockedByIteration();
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (Count + 2 >= cap) {
                     EnsureCapacityInternal(ref storage, (ushort)(Count + 3));
@@ -267,7 +271,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertNotBlockedByIteration();
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (Count + 3 >= cap) {
                     EnsureCapacityInternal(ref storage, (ushort)(Count + 4));
@@ -309,7 +313,7 @@ namespace FFS.Libraries.StaticEcs {
                     if (src == null) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.Add ] src is null");
                     if (srcIdx + len > src.Length) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.Add ] srcIdx + len > src.Length");
                     #endif
-                    ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                    ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                     var cap = SegmentAllocator.MinSlotCapacity << Level;
                     if (Count + len > cap) {
                         EnsureCapacityInternal(ref storage, (ushort)(Count + len));
@@ -334,7 +338,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (idx < 0 || idx >= Count) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.RemoveAt ] index out of bounds: {idx}");
                 #endif
-                var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                 Count--;
                 if (idx < Count) {
                     Utils.LoopFallbackCopy(values, Offset + (uint)idx + 1, values, Offset + (uint)idx, (uint)(Count - idx));
@@ -356,7 +360,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (idx < 0 || idx >= Count) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.RemoveAtSwap ] index out of bounds: {idx}");
                 #endif
-                var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                 values[Offset + idx] = values[Offset + --Count];
                 if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>()) {
                     values[Offset + Count] = default;
@@ -373,7 +377,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (Count == 0) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.RemoveFirst ] empty");
                 #endif
-                var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                 Count--;
                 if (Count > 0) {
                     Utils.LoopFallbackCopy(values, Offset + 1, values, Offset, Count);
@@ -393,7 +397,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (Count == 0) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.RemoveFirstSwap ] empty");
                 #endif
-                var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                 values[Offset] = values[Offset + --Count];
                 if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>()) {
                     values[Offset + Count] = default;
@@ -412,7 +416,7 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 Count--;
                 if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>()) {
-                    var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                    var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                     values[Offset + Count] = default;
                 }
             }
@@ -481,7 +485,7 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 if (Count > 0) {
                     if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>()) {
-                        var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                        var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                         Utils.LoopFallbackClear(values, (int)Offset, Count);
                     }
                     Count = 0;
@@ -517,7 +521,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertNotBlockedByIteration();
                 if (idx < 0 || idx > Count) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.InsertAt ] index out of bounds: {idx}");
                 #endif
-                ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                 if (Count >= SegmentAllocator.MinSlotCapacity << Level) {
                     Grow(ref storage);
                 }
@@ -541,7 +545,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <returns>Index of the item within the collection, or -1.</returns>
             [MethodImpl(AggressiveInlining)]
             public readonly int IndexOf(TValue item) {
-                var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                 var indexOf = Array.IndexOf(values, item, (int)Offset, Count);
                 return indexOf >= 0 ? (int)(indexOf - Offset) : -1;
             }
@@ -554,7 +558,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public readonly bool Contains(TValue item) {
                 var equalityComparer = EqualityComparer<TValue>.Default;
-                var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                 for (var i = Offset; i < Offset + Count; i++) {
                     if (equalityComparer.Equals(values[i], item)) return true;
                 }
@@ -571,7 +575,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <returns><c>true</c> if <paramref name="item"/> is found; <c>false</c> otherwise.</returns>
             [MethodImpl(AggressiveInlining)]
             public readonly bool Contains<TComparer>(TValue item, TComparer comparer) where TComparer : IEqualityComparer<TValue> {
-                var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                 for (var i = Offset; i < Offset + Count; i++) {
                     if (comparer.Equals(values[i], item)) return true;
                 }
@@ -595,7 +599,7 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (Count + additionalSize > cap) {
-                    ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                    ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                     EnsureCapacityInternal(ref storage, (ushort)(Count + additionalSize));
                 }
             }
@@ -616,7 +620,7 @@ namespace FFS.Libraries.StaticEcs {
                 }
                 #endif
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
-                ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                 if (Count + count > cap) {
                     EnsureCapacityInternal(ref storage, (ushort)(Count + count));
                 }
@@ -643,7 +647,7 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (Count + count > cap) {
-                    ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                    ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                     EnsureCapacityInternal(ref storage, (ushort)(Count + count));
                 }
 
@@ -663,7 +667,7 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 var cap = SegmentAllocator.MinSlotCapacity << Level;
                 if (cap < newCapacity) {
-                    ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                    ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                     EnsureCapacityInternal(ref storage, newCapacity);
                 }
             }
@@ -679,7 +683,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (dst == null) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.CopyTo ] dst is null");
                 if (Count > dst.Length) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.CopyTo ] count > dst.Length");
                 #endif
-                Utils.LoopFallbackCopy(Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], Offset, dst, 0, Count);
+                Utils.LoopFallbackCopy(Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], Offset, dst, 0, Count);
             }
 
             /// <summary>
@@ -696,7 +700,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (dstIdx + len > dst.Length) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.CopyTo ] dstIdx + len > dst.Length");
                 if (len > Count) throw new StaticEcsException($"[ Multi<{typeof(TValue)}>.CopyTo ] len > count");
                 #endif
-                Utils.LoopFallbackCopy(Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], Offset, dst, (uint)dstIdx, (uint)len);
+                Utils.LoopFallbackCopy(Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], Offset, dst, (uint)dstIdx, (uint)len);
             }
 
             /// <summary>
@@ -705,7 +709,7 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public readonly void Sort() {
-                Array.Sort(Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], (int)Offset, Count);
+                Array.Sort(Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], (int)Offset, Count);
             }
 
             /// <summary>
@@ -715,12 +719,12 @@ namespace FFS.Libraries.StaticEcs {
             /// <param name="comparer">The comparer to use for ordering.</param>
             [MethodImpl(AggressiveInlining)]
             public readonly void Sort<TComparer>(TComparer comparer) where TComparer : IComparer<TValue> {
-                Array.Sort(Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], (int)Offset, Count, comparer);
+                Array.Sort(Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx], (int)Offset, Count, comparer);
             }
 
             public readonly override string ToString() {
                 var res = "";
-                var values = Resources<MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
+                var values = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[SegmentIdx];
                 for (int i = 0; i < Count; i++) {
                     res += values[Offset + i].ToString();
                     if (i + 1 < Count) res += ", ";
@@ -770,7 +774,7 @@ namespace FFS.Libraries.StaticEcs {
                 var segmentIdx = entityId >> Const.ENTITIES_IN_SEGMENT_SHIFT;
                 var segmentEntityIdx = (byte)(entityId & Const.ENTITIES_IN_SEGMENT_MASK);
 
-                ref var storage = ref World<TW>.Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref World<TW>.Resources<TW, MultiValueStorage<TValue>>.Value;
                 storage.EnsureSegment(segmentIdx);
 
                 SegmentIdx = segmentIdx;
@@ -782,7 +786,7 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             public void OnDelete<TW>(World<TW>.Entity self, HookReason reason) where TW : struct, IWorldType {
-                ref var storage = ref World<TW>.Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref World<TW>.Resources<TW, MultiValueStorage<TValue>>.Value;
                 Clear();
                 storage.Allocators[SegmentIdx].Free(Offset, Level, out var empty);
                 if (empty) {
@@ -793,7 +797,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             public void CopyTo<TW>(World<TW>.Entity self, World<TW>.Entity other, bool disabled) where TW : struct, IWorldType {
                 ref var dst = ref World<TW>.Components<Multi<TValue>>.Instance.Add(other);
-                ref var storage = ref World<TW>.Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref World<TW>.Resources<TW, MultiValueStorage<TValue>>.Value;
 
                 var neededCapacity = (ushort)Utils.RoundUpToPowerOf2(Math.Max(Count, SegmentAllocator.MinSlotCapacity));
                 var neededLevel = SegmentAllocator.LevelForCapacity(neededCapacity);
@@ -825,7 +829,7 @@ namespace FFS.Libraries.StaticEcs {
             public void Write<TW>(ref BinaryPackWriter writer, World<TW>.Entity self) where TW : struct, IWorldType {
                 writer.WriteUshort(Count);
                 if (Count > 0) {
-                    ref var storage = ref World<TW>.Resources<MultiValueStorage<TValue>>.Value;
+                    ref var storage = ref World<TW>.Resources<TW, MultiValueStorage<TValue>>.Value;
                     if (storage.ElementStrategy.IsUnmanaged()) {
                         storage.ElementStrategy.WriteArray(ref writer, storage.Segments[SegmentIdx], (int)Offset, Count);
                     } else {
@@ -849,7 +853,7 @@ namespace FFS.Libraries.StaticEcs {
                 var segmentIdx = entityId >> Const.ENTITIES_IN_SEGMENT_SHIFT;
                 var segmentEntityIdx = (byte)(entityId & Const.ENTITIES_IN_SEGMENT_MASK);
 
-                ref var storage = ref World<TW>.Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref World<TW>.Resources<TW, MultiValueStorage<TValue>>.Value;
                 storage.EnsureSegment(segmentIdx);
 
                 SegmentIdx = segmentIdx;
@@ -878,7 +882,7 @@ namespace FFS.Libraries.StaticEcs {
                 var hasWrite = MultiComponentType<TValue>.HasWrite();
                 var hasRead = MultiComponentType<TValue>.HasRead();
 
-                ref var storage = ref World<TW>.ResourcesData.Instance.GetOrCreate<MultiValueStorage<TValue>>(out var isNew);
+                ref var storage = ref World<TW>.ResourcesData<TW>.Instance.GetOrCreate<MultiValueStorage<TValue>>(out var isNew);
                 if (isNew) {
                     storage.Init(Data.Instance.EntitiesSegments.Length, false, false, false, hasWrite, hasRead);
                     storage.ElementStrategy = ElementStrategy ?? AutoRegistration.TryCreateUnmanagedPackArrayStrategy<TValue>() ?? new StructPackArrayStrategy<TValue>();
@@ -900,21 +904,21 @@ namespace FFS.Libraries.StaticEcs {
             #if FFS_ECS_DEBUG
             [MethodImpl(AggressiveInlining)]
             private readonly void AssertNotBlockedByIteration() {
-                if (Resources<MultiValueStorage<TValue>>.Value.IsBlockedByIteration(SegmentIdx, Offset)) {
+                if (Resources<TWorld, MultiValueStorage<TValue>>.Value.IsBlockedByIteration(SegmentIdx, Offset)) {
                     throw new StaticEcsException($"[ Multi<{typeof(TValue)}> ] Cannot modify while being iterated.");
                 }
             }
             #endif
 
             internal static void _ResizeStorage(uint segmentCapacity) {
-                ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                 if (storage.Segments != null) {
                     storage.EnsureCapacity((int)segmentCapacity);
                 }
             }
 
             private static void _ResetStorage() {
-                ref var storage = ref Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
                 if (storage.Segments == null) return;
                 for (var i = 0; i < storage.Segments.Length; i++) {
                     if (storage.Segments[i] != null) {
@@ -1021,7 +1025,7 @@ namespace FFS.Libraries.StaticEcs {
 
             /// <inheritdoc cref="Multi{TValue}.AsReadOnlySpan"/>
             public readonly ReadOnlySpan<TValue> AsReadOnlySpan {
-                [MethodImpl(AggressiveInlining)] get => new(Resources<MultiValueStorage<TValue>>.Value.Segments[Multi.SegmentIdx], (int)Multi.Offset, Multi.Count);
+                [MethodImpl(AggressiveInlining)] get => new(Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[Multi.SegmentIdx], (int)Multi.Offset, Multi.Count);
             }
 
             /// <summary>
@@ -1085,7 +1089,7 @@ namespace FFS.Libraries.StaticEcs {
             /// <returns>A read-only reverse iterator over the elements.</returns>
             [MethodImpl(AggressiveInlining)]
             public ROMultiComponentsIterator<TValue> GetEnumerator() => new(
-                Resources<MultiValueStorage<TValue>>.Value.Segments[Multi.SegmentIdx],
+                Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[Multi.SegmentIdx],
                 Multi.SegmentIdx,
                 Multi.Offset,
                 Multi.Count
@@ -1142,14 +1146,14 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             internal MultiComponentsIterator(Multi<TValue> multi) {
-                _segment = Resources<MultiValueStorage<TValue>>.Value.Segments[multi.SegmentIdx];
+                _segment = Resources<TWorld, MultiValueStorage<TValue>>.Value.Segments[multi.SegmentIdx];
                 _start = (int)multi.Offset;
                 _index = (int)(multi.Offset + multi.Count);
                 #if FFS_ECS_DEBUG
                 _segmentIdx = multi.SegmentIdx;
                 _offset = multi.Offset;
                 _disposed = false;
-                Resources<MultiValueStorage<TValue>>.Value.BlockIteration(multi.SegmentIdx, multi.Offset);
+                Resources<TWorld, MultiValueStorage<TValue>>.Value.BlockIteration(multi.SegmentIdx, multi.Offset);
                 #endif
             }
 
@@ -1167,7 +1171,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 if (!_disposed) {
                     _disposed = true;
-                    Resources<MultiValueStorage<TValue>>.Value.UnblockIteration(_segmentIdx, _offset);
+                    Resources<TWorld, MultiValueStorage<TValue>>.Value.UnblockIteration(_segmentIdx, _offset);
                 }
                 #endif
             }
@@ -1205,7 +1209,7 @@ namespace FFS.Libraries.StaticEcs {
                 _disposed = false;
                 _segmentIdx = segmentIdx;
                 _offset = offset;
-                Resources<MultiValueStorage<TValue>>.Value.BlockIteration(segmentIdx, offset);
+                Resources<TWorld, MultiValueStorage<TValue>>.Value.BlockIteration(segmentIdx, offset);
                 #endif
             }
 
@@ -1223,7 +1227,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 if (!_disposed) {
                     _disposed = true;
-                    Resources<MultiValueStorage<TValue>>.Value.UnblockIteration(_segmentIdx, _offset);
+                    Resources<TWorld, MultiValueStorage<TValue>>.Value.UnblockIteration(_segmentIdx, _offset);
                 }
                 #endif
             }
@@ -1234,7 +1238,7 @@ namespace FFS.Libraries.StaticEcs {
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
     [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
     #endif
-    internal struct MultiValueStorage<TValue> where TValue : struct, IMultiComponent {
+    internal struct MultiValueStorage<TValue> : IResource where TValue : struct, IMultiComponent {
         internal TValue[][] Segments;
         internal SegmentAllocator[] Allocators;
         private TValue[][] _segmentsPool;
@@ -1500,7 +1504,7 @@ namespace FFS.Libraries.StaticEcs {
 
             if (newSegment) {
                 var segIdx = value[idx].SegmentIdx;
-                ref var storage = ref World<TWorld>.Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref World<TWorld>.Resources<TWorld, MultiValueStorage<TValue>>.Value;
                 ref var alloc = ref storage.Allocators[segIdx];
 
                 writer.WriteUint(alloc.Used);
@@ -1526,7 +1530,7 @@ namespace FFS.Libraries.StaticEcs {
 
             if (reader.ReadBool()) {
                 var segIdx = result[idx].SegmentIdx;
-                ref var storage = ref World<TWorld>.Resources<MultiValueStorage<TValue>>.Value;
+                ref var storage = ref World<TWorld>.Resources<TWorld, MultiValueStorage<TValue>>.Value;
 
                 storage.EnsureSegment(segIdx);
                 ref var alloc = ref storage.Allocators[segIdx];

@@ -219,15 +219,16 @@ ___
 // Standard initialization (baseEntitiesCapacity — initial entity capacity)
 W.Initialize(baseEntitiesCapacity: 4096);
 
-// Initialize with restored entity identifiers (EntityGID versions)
-W.InitializeFromGIDStoreSnapshot(snapshot);
+// After initialization, an existing snapshot can be loaded:
+// — entity identifiers only (EntityGID versions)
+W.Serializer.RestoreFromGIDStoreSnapshot(snapshot);
 
-// Initialize with full world restoration from a snapshot
-W.InitializeFromWorldSnapshot(snapshot);
+// — or full world state (entities and all their data)
+W.Serializer.LoadWorldSnapshot(snapshot);
 ```
 
 {: .note }
-`InitializeFromGIDStoreSnapshot` restores only entity identifier metadata (GID versions). `InitializeFromWorldSnapshot` restores the full world state, including all entities and their data.
+`RestoreFromGIDStoreSnapshot` restores only entity identifier metadata (GID versions). `LoadWorldSnapshot` restores the full world state, including all entities and their data. Both require the world to already be initialized.
 
 ___
 

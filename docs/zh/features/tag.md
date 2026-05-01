@@ -38,14 +38,13 @@ W.Initialize();
 ```
 
 {: .notezh }
-标签自动获得由类型名称计算的稳定 GUID。要提供配置（GUID 覆盖、变更追踪），请在标签结构体上实现 `ITagConfig<T>` 接口。手动注册和 `RegisterAll()` 都会自动使用它：
+标签自动获得由类型名称计算的稳定 GUID。要覆盖 GUID，请在标签结构体上实现 `ITagConfig<T>` 接口。手动注册和 `RegisterAll()` 都会自动使用它。变更追踪通过实现标记接口启用 — 参见[变更追踪](tracking)：
 
 ```csharp
-public struct Poisoned : ITag, ITagConfig<Poisoned> {
+public struct Poisoned : ITag, ITagConfig<Poisoned>,
+                         ITrackableAdded, ITrackableDeleted {
     public TagTypeConfig<Poisoned> Config() => new(
-        guid: new Guid("A1B2C3D4-..."),
-        trackAdded: true,    // 启用添加追踪（默认 — false）
-        trackDeleted: true   // 启用删除追踪（默认 — false）
+        guid: new Guid("A1B2C3D4-...")
     );
 }
 ```

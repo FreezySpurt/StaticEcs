@@ -51,7 +51,8 @@ public abstract class GameSys : W.Systems<GameSystems> { }
 - `Ref<T>()` 返回组件的 ref 引用。假设组件存在——不确定时用 `Has<T>()` 检查。
 - 对于只读组件，使用 `Read<T>()`（返回 `ref readonly`）代替 `Ref<T>()`，在查询委托中使用 `in` 代替 `ref`。
 - 查询过滤器类型：`All<>` (要求), `None<>` (排除), `Any<>` (至少一个)。这些过滤器同时适用于组件和标签。组合：`And<Filter1, Filter2>`（全部匹配）或 `Or<Filter1, Filter2>`（任一匹配）。
-- 默认查询模式是 Strict——迭代期间不要修改其他实体上的被过滤类型。需要时使用 `EntitiesFlexible()`。
+- `Disable<T>()`/`Enable<T>()`/`HasDisabled<T>()`/`HasEnabled<T>()` 以及 `*Disabled` 过滤器（`AllOnlyDisabled`、`AllWithDisabled`、`NoneWithDisabled`、`AnyOnlyDisabled`、`AnyWithDisabled`）的约束为 `T : struct, IComponent, IDisableable` — opt-in 标记。未标记的组件不能被禁用（编译错误）。内置的 `Multi<T>`、`Link<T>`、`Links<T>` 已实现 `IDisableable`。
+- 默认查询模式是 Strict。限制仅适用于**属于迭代快照的其他实体**（在迭代开始时与过滤器匹配的实体的位掩码）。在 Strict 和 Flexible **两种模式**下，迭代期间修改快照中其他实体上的被过滤组件/标签类型都是禁止的（DEBUG 下断言）。快照之外的实体——在迭代中创建的或未通过过滤的——**不会**被阻止：可以在循环体内自由创建并配置新实体。只有在需要在迭代期间对快照中的其他实体执行 `Destroy`/`Disable`/`Enable` 时才使用 `EntitiesFlexible()`——这是它提供的唯一额外自由度。
 - `ForParallel` 期间只修改当前实体。禁止结构变更。
 
 ### 常见模式

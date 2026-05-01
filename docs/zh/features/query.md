@@ -8,7 +8,7 @@ nav_order: 12
 查询是在世界中搜索实体及其组件的机制
 - 所有查询无需缓存，在栈上分配，可以即时使用
 - 支持按组件、标签、实体状态和集群过滤
-- 两种迭代模式：`Strict`（默认，更快）和 `Flexible`（允许修改其他实体上的过滤类型）
+- 两种迭代模式：`Strict`（默认，更快）和 `Flexible`（额外允许在迭代期间对快照中的其他实体进行销毁 / 禁用 / 启用）。两种模式下，快照之外的实体——在迭代中创建的新实体或未通过过滤的实体——均不受限制。
 
 ___
 
@@ -54,6 +54,11 @@ AnyOnlyDisabled<Position, Velocity> anyDis = default;
 
 // AnyWithDisabled — 至少一个（任何状态）
 AnyWithDisabled<Position, Velocity> anyAll = default;
+
+// 注意：以上五种 *Disabled 系列过滤器（AllOnlyDisabled、AllWithDisabled、
+// NoneWithDisabled、AnyOnlyDisabled、AnyWithDisabled）的类型参数约束为
+// `struct, IComponent, IDisableable`。未实现 IDisableable 标记的组件
+// 不能在这里使用 — 编译期错误。详见 features/component.md#enabledisable。
 
 // 以上实体的结果：
 // All<Position, Velocity>              → 1, 3
@@ -108,7 +113,7 @@ AnyDeleted<Position, Velocity> anyDeleted = default;
 NoneDeleted<Position> noneDeleted = default;
 
 // AllChanged — 自上次 ClearChangedTracking 以来所有指定组件被更改（1 到 5 个类型）
-// 需要 ComponentTypeConfig.TrackChanged = true
+// 需要组件类型实现 ITrackableChanged
 AllChanged<Position> changed = default;
 
 // AnyChanged — 至少一个被更改（2 到 5 个类型）
@@ -248,9 +253,10 @@ foreach (var entity in W.Query(filter).Entities()) {
     entity.Ref<Position>().Value += entity.Read<Velocity>().Value;
 }
 
-// Flexible 模式 — 允许修改其他实体上的过滤类型
+// Flexible 模式 — 允许在迭代期间销毁 / 禁用 / 启用快照中的其他实体
 foreach (var entity in W.Query<All<Position>>().EntitiesFlexible()) {
-    // ...
+    // 安全：another.Destroy()、another.Disable()、another.Enable()
+    // 仍然禁止（DEBUG 下断言）：another.Delete<Position>()、another.Disable<Position>() 等
 }
 
 // 查找第一个匹配的实体
@@ -262,6 +268,21 @@ if (W.Query<All<Position>>().Any(out var found)) {
 if (W.Query<All<Position>>().One(out var single)) {
     // single — 唯一具有 Position 的实体
 }
+
+// 检查给定实体是否属于查询结果
+//   - 检查实体生命周期状态（默认仅 Enabled）
+//   - 检查所属集群（若提供 clusters）
+//   - 通过 Entity.IsMatch 应用查询过滤器
+if (W.Query<All<Position, Velocity>>().Contains(entity)) {
+    // entity 已启用且通过过滤器
+}
+
+// 可选参数
+W.Query<All<Position>>().Contains(
+    entity,
+    entities: EntityStatusType.Any,                 // Enabled（默认）、Disabled、Any
+    clusters: stackalloc ushort[] { 1, 2 }          // 为空 = 任意集群
+);
 
 // 统计匹配的实体数量（完整遍历）
 int count = W.Query<All<Position>>().EntitiesCount();
@@ -675,21 +696,37 @@ ___
 
 用于 `For`、`Search`、`Entities` 方法：
 
-- **`QueryMode.Strict`**（默认）— 禁止在迭代期间修改**其他**实体上的过滤组件/标签类型。更快。
-- **`QueryMode.Flexible`** — 允许修改其他实体上的过滤类型，正确控制当前迭代。
+- **`QueryMode.Strict`**（默认）— DEBUG 断言是精确的：在**快照中非当前实体**上，仅阻止那些可能从过滤类型 `T` 移除已缓存匹配的操作，以及实体级 `Destroy`、`Disable`（迭代 `Enabled` 时）、`Enable`（迭代 `Disabled` 时）：
+
+  | 过滤器              | 在快照中非当前实体上被阻止              |
+  |---------------------|-------------------------------------|
+  | `All<T>`             | `Delete<T>`、`Disable<T>`            |
+  | `AllOnlyDisabled<T>` | `Delete<T>`、`Enable<T>`             |
+  | `AllWithDisabled<T>` | `Delete<T>`                         |
+  | `None<T>`            | `Add<T>`、`Set<T>`、`Enable<T>`      |
+
+  对**不在过滤器中的类型**、对**快照之外的实体**（迭代期间创建或未通过过滤）以及对**当前实体**的操作不会被阻止。Strict 是最快的模式（对完全填充的块使用快速路径）。
+
+- **`QueryMode.Flexible`** — 对过滤类型施加与 Strict 相同的阻止规则，但**额外允许**对快照中的其他实体进行实体级 `Destroy` / `Disable` / `Enable`（这些实体会通过缓存位掩码更新而被正确地从剩余迭代中排除）。较慢——逐实体重新读取缓存的位掩码。
 
 ```csharp
 var anotherEntity = W.NewEntity<Default>();
 anotherEntity.Add<Position>();
 
-// Strict：修改另一个实体的 Position — DEBUG 中报错
+// Strict：在迭代期间销毁快照中的其他实体 — DEBUG 中报错
 foreach (var entity in W.Query<All<Position>>().Entities()) {
-    anotherEntity.Delete<Position>(); // DEBUG 中报错
+    anotherEntity.Destroy(); // DEBUG 中报错（anotherEntity 在快照中）
+
+    // OK — 在迭代中创建的新实体不在快照中
+    var fresh = W.NewEntity<Default>();
+    fresh.Add<Position>();
+    fresh.Set(new Velocity { ... });
 }
 
-// Flexible：允许修改，迭代保持稳定
+// Flexible：允许对快照中的其他实体进行 destroy/disable/enable
 foreach (var entity in W.Query<All<Position>>().EntitiesFlexible()) {
-    anotherEntity.Delete<Position>(); // OK — anotherEntity 被正确排除
+    anotherEntity.Destroy();            // OK — 从剩余迭代中排除
+    // anotherEntity.Delete<Position>(); // 仍然 DEBUG 报错 — 对快照中的其他实体修改过滤类型
 }
 
 // 对于 For/Search 通过参数设置
@@ -699,4 +736,4 @@ W.Query().For(static (ref Position pos) => {
 ```
 
 {: .notezh }
-`Flexible` 适用于层次结构或缓存，当从一个实体的组件修改其他实体时。其他情况下推荐使用 `Strict` 以获得更好的性能。
+`Flexible` 适用于迭代逻辑需要销毁或切换（`Disable`/`Enable`）快照中其他实体的场景——例如在遍历父节点时裁剪子实体，或批量停用受 AoE 影响的实体。它**不会**解除过滤类型的阻止规则——此类修改必须延迟执行（例如收集到缓冲区中，在 `foreach` 之后再应用）。其他情况下推荐使用 `Strict` 以获得更好的性能。在循环体内创建新实体并配置它们在两种模式下都被允许——新创建的实体不属于迭代快照。

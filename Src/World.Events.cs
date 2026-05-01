@@ -416,7 +416,7 @@ namespace FFS.Libraries.StaticEcs {
                 _receiverDatas[_receiversCount].Sequence = (ulong) _sequence;
                 return new EventReceiver<TWorld, T>(_receiversCount++);
             }
-            
+
             [MethodImpl(AggressiveInlining)]
             internal void DeleteReceiver(ref EventReceiver<TWorld, T> receiver) {
                 #if FFS_ECS_DEBUG
@@ -430,6 +430,9 @@ namespace FFS.Libraries.StaticEcs {
                     receiver.Id = -1;
                 }
             }
+
+            [MethodImpl(AggressiveInlining)]
+            internal readonly ulong ReceiverSequence(int receiverId) => _receiverDatas[receiverId].Sequence;
 
             [MethodImpl(AggressiveInlining)]
             internal readonly void DestroyEvents() {
@@ -563,12 +566,59 @@ namespace FFS.Libraries.StaticEcs {
                 next = -1;
                 return false;
             }
+
+            [MethodImpl(AggressiveInlining)]
+            internal bool PeekOne(int receiverId, ref ulong peekSeq, out int eventIdx) {
+                while (peekSeq != (ulong) _sequence) {
+                    eventIdx = (int) (peekSeq++ & MAX_EVENTS_OFFSET_MASK);
+                    var pageIdx = (uint) (eventIdx >> EVENT_PAGE_SHIFT);
+                    var inPageIdx = (uint) (eventIdx & EVENT_PAGE_OFFSET_MASK);
+                    var maskIdx = (byte) (inPageIdx >> EVENT_IN_PAGE_MASK_SHIFT);
+                    var inMaskBit = (byte) (inPageIdx & EVENT_IN_PAGE_OFFSET_MASK);
+                    if ((_pages[pageIdx].Mask[maskIdx] & (1L << inMaskBit)) != 0) {
+                        return true;
+                    }
+                }
+                eventIdx = -1;
+                return false;
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            internal bool LastOnlyOne(int receiverId, ref ulong seq, ref bool headSeq, out int eventIdx) {
+                ref var receiver = ref _receiverDatas[receiverId];
+                while (seq != (ulong)_sequence) {
+                    var pos = (int)(seq++ & MAX_EVENTS_OFFSET_MASK);
+                    var pageIdx = (uint)(pos >> EVENT_PAGE_SHIFT);
+                    var inPageIdx = (uint)(pos & EVENT_PAGE_OFFSET_MASK);
+                    var maskIdx = (byte)(inPageIdx >> EVENT_IN_PAGE_MASK_SHIFT);
+                    var inMaskBit = (byte)(inPageIdx & EVENT_IN_PAGE_OFFSET_MASK);
+
+                    if (_pages[pageIdx].UnreadReceiversCount[inPageIdx] > 1) {
+                        headSeq = false;
+                    }
+                    else {
+                        if (headSeq) {
+                            receiver.Sequence++;
+                        }
+                        
+                        if ((_pages[pageIdx].Mask[maskIdx] & (1L << inMaskBit)) != 0) {
+                            eventIdx = pos;
+                            CleanupEvent(pos);
+                            return true;
+                        }
+                    }
+                }
+
+                eventIdx = -1;
+                return false;
+            }
             
             [MethodImpl(AggressiveInlining)]
-            internal void ReadAll(int receiverId, EventAction<T> action) {
+            internal int ReadAll(int receiverId, EventAction<T> action) {
                 ref var receiver = ref _receiverDatas[receiverId];
                 var ev = new Event<T>();
                 ref var next = ref ev.EventIdx;
+                var count = 0;
 
                 while (receiver.Sequence != (ulong) _sequence) {
                     next = (int) (receiver.Sequence++ & MAX_EVENTS_OFFSET_MASK);
@@ -581,6 +631,7 @@ namespace FFS.Libraries.StaticEcs {
 
                     if ((mask[maskIdx] & (1L << inMaskBit)) != 0) {
                         action(ev);
+                        count++;
                     }
 
                     ref var unreadCount = ref page.UnreadReceiversCount[inPageIdx];
@@ -610,13 +661,16 @@ namespace FFS.Libraries.StaticEcs {
                         }
                     }
                 }
+
+                return count;
             }
 
             [MethodImpl(AggressiveInlining)]
-            internal void ReadAll(int receiverId) {
+            internal int ReadAll(int receiverId) {
                 ref var receiver = ref _receiverDatas[receiverId];
                 var ev = new Event<T>();
                 ref var next = ref ev.EventIdx;
+                var count = 0;
 
                 while (receiver.Sequence != (ulong) _sequence) {
                     next = (int) (receiver.Sequence++ & MAX_EVENTS_OFFSET_MASK);
@@ -629,6 +683,7 @@ namespace FFS.Libraries.StaticEcs {
                     ref var unreadCount = ref page.UnreadReceiversCount[inPageIdx];
                     if (unreadCount != 0) {
                         unreadCount--;
+                        count++;
                         if (unreadCount == 0) {
                             mask[maskIdx] &= ~(1L << inMaskBit);
                             #if FFS_ECS_DEBUG
@@ -654,6 +709,8 @@ namespace FFS.Libraries.StaticEcs {
                         }
                     }
                 }
+
+                return count;
             }
 
             [MethodImpl(AggressiveInlining)]
@@ -693,10 +750,11 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             [MethodImpl(AggressiveInlining)]
-            internal void SuppressAll(int receiverId) {
+            internal int SuppressAll(int receiverId) {
                 ref var receiver = ref _receiverDatas[receiverId];
                 var ev = new Event<T>();
                 ref var next = ref ev.EventIdx;
+                var count = 0;
 
                 while (receiver.Sequence != (ulong) _sequence) {
                     next = (int) (receiver.Sequence++ & MAX_EVENTS_OFFSET_MASK);
@@ -710,6 +768,7 @@ namespace FFS.Libraries.StaticEcs {
                     ref var unreadCount = ref page.UnreadReceiversCount[inPageIdx];
                     if (unreadCount != 0) {
                         unreadCount = 0;
+                        count++;
                         mask[maskIdx] &= ~(1L << inMaskBit);
                         
                         #if FFS_ECS_DEBUG
@@ -734,8 +793,10 @@ namespace FFS.Libraries.StaticEcs {
                         }
                     }
                 }
+
+                return count;
             }
-            
+
             [MethodImpl(AggressiveInlining)]
             internal readonly ushort EventVersion(int eventIdx) {
                 var pageIdx = (uint) (eventIdx >> EVENT_PAGE_SHIFT);
@@ -1064,8 +1125,134 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
             }
         }
+
+        /// <summary>
+        /// Zero-allocation enumerator for <b>peeking</b> events from an
+        /// <see cref="EventReceiver{TWorld, TEvent}"/> via <c>foreach</c> — without consuming them.
+        /// <para>
+        /// Neither the receiver's read cursor nor any per-event <c>UnreadReceiversCount</c> are
+        /// modified. Repeated <c>foreach (var e in receiver.Peek())</c> yields the same set of
+        /// events. Useful for multi-pass handling, dry-run/diagnostics, or reading queued state
+        /// without committing to consumption.
+        /// </para>
+        /// <para>
+        /// During iteration the event pool is locked in read-only mode (debug builds only) —
+        /// sending new events or modifying receivers will throw.
+        /// </para>
+        /// </summary>
+        /// <typeparam name="TEvent">The event struct type.</typeparam>
+        #if NET5_0_OR_GREATER
+        [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Event metadata is preserved by the registration path.")]
+        #endif
+        public ref struct PeekIterator<TEvent> where TEvent : struct, IEvent {
+            private Event<TEvent> _current;
+            private readonly int _id;
+            private ulong _seq;
+
+            [MethodImpl(AggressiveInlining)]
+            internal PeekIterator(int id) {
+                _id = id;
+                _current = new Event<TEvent>(-1);
+                _seq = Events<TEvent>.Instance.ReceiverSequence(id);
+                #if FFS_ECS_DEBUG
+                Events<TEvent>.Instance.AddBlocker(1);
+                #endif
+            }
+
+            /// <summary>Gets the <see cref="Event{TEvent}"/> wrapper for the event at the current peek position.</summary>
+            public Event<TEvent> Current {
+                [MethodImpl(AggressiveInlining)] get => _current;
+            }
+
+            /// <summary>Returns this iterator so it can be used directly in <c>foreach</c>.</summary>
+            [MethodImpl(AggressiveInlining)]
+            public PeekIterator<TEvent> GetEnumerator() => this;
+
+            /// <summary>Advances the local peek cursor to the next unread event without modifying any state.</summary>
+            [MethodImpl(AggressiveInlining)]
+            public bool MoveNext() => Events<TEvent>.Instance.PeekOne(_id, ref _seq, out _current.EventIdx);
+
+            /// <summary>Releases the read-only lock (debug builds). No event state is changed.</summary>
+            [MethodImpl(AggressiveInlining)]
+            public void Dispose() {
+                #if FFS_ECS_DEBUG
+                Events<TEvent>.Instance.AddBlocker(-1);
+                #endif
+            }
+        }
+
+        /// <summary>
+        /// Zero-allocation enumerator that walks unread events from the receiver's cursor onward
+        /// and yields <b>only those for which this receiver is the last unread reader</b>
+        /// (<see cref="Event{TEvent}.IsLastReading"/> would be <c>true</c>), automatically
+        /// consuming each yielded event.
+        /// <para>
+        /// Events still pending other receivers (<c>UnreadCount &gt; 1</c>) are silently skipped
+        /// without modifying their state — they remain reachable on subsequent passes. Cleared or
+        /// suppressed slots are skipped too. The receiver's cursor advances only past the
+        /// contiguous prefix of done events from its current position; once the walk crosses an
+        /// unprocessed event, the cursor stops moving but the iterator keeps scanning forward
+        /// looking for later events where this receiver already is last.
+        /// </para>
+        /// <para>
+        /// This expresses the «do something exactly once after every other receiver has reacted»
+        /// pattern without depending on system order within a frame.
+        /// </para>
+        /// <para>
+        /// Only one receiver per event type should use this iterator — two would wait on each
+        /// other forever. The framework does not validate this; it is the user's responsibility.
+        /// During iteration the event pool is locked in read-only mode (debug builds only).
+        /// </para>
+        /// </summary>
+        /// <typeparam name="TEvent">The event struct type.</typeparam>
+        #if NET5_0_OR_GREATER
+        [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Event metadata is preserved by the registration path.")]
+        #endif
+        public ref struct LastOnlyIterator<TEvent> where TEvent : struct, IEvent {
+            private Event<TEvent> _current;
+            private readonly int _id;
+            private ulong _seq;
+            private bool _headSeq;
+
+            [MethodImpl(AggressiveInlining)]
+            internal LastOnlyIterator(int id) {
+                _id = id;
+                _current = new Event<TEvent>(-1);
+                _seq = Events<TEvent>.Instance.ReceiverSequence(id);
+                _headSeq = true;
+                #if FFS_ECS_DEBUG
+                Events<TEvent>.Instance.AddBlocker(1);
+                #endif
+            }
+
+            /// <summary>Gets the <see cref="Event{TEvent}"/> wrapper for the event at the current iterator position.</summary>
+            public Event<TEvent> Current {
+                [MethodImpl(AggressiveInlining)] get => _current;
+            }
+
+            /// <summary>Returns this iterator so it can be used directly in <c>foreach</c>.</summary>
+            [MethodImpl(AggressiveInlining)]
+            public LastOnlyIterator<TEvent> GetEnumerator() => this;
+
+            /// <summary>
+            /// Walks the next event for which this receiver is the last unread reader, consuming
+            /// and yielding it. Skips past events where other receivers are still pending (without
+            /// modifying their state) and past already-cleared slots. Returns <c>false</c> when no
+            /// more last-reading events remain in the current pass.
+            /// </summary>
+            [MethodImpl(AggressiveInlining)]
+            public bool MoveNext() => Events<TEvent>.Instance.LastOnlyOne(_id, ref _seq, ref _headSeq, out _current.EventIdx);
+
+            /// <summary>Releases the read-only lock (debug builds). All consumed events have been finalized inline.</summary>
+            [MethodImpl(AggressiveInlining)]
+            public void Dispose() {
+                #if FFS_ECS_DEBUG
+                Events<TEvent>.Instance.AddBlocker(-1);
+                #endif
+            }
+        }
     }
-    
+
     #if ENABLE_IL2CPP
     [Il2CppSetOption(Option.NullChecks, Const.IL2CPPNullChecks)]
     [Il2CppSetOption(Option.ArrayBoundsChecks, Const.IL2CPPArrayBoundsChecks)]
@@ -1110,14 +1297,18 @@ namespace FFS.Libraries.StaticEcs {
         /// Delegate called for each unread event. Receives an <see cref="World{TWorld}.Event{TEvent}"/>
         /// wrapper providing access to <see cref="World{TWorld}.Event{TEvent}.Value"/>.
         /// </param>
+        /// <returns>
+        /// The number of events for which <paramref name="action"/> was invoked. Events already
+        /// suppressed by another receiver are skipped and not counted.
+        /// </returns>
         /// <exception cref="StaticEcsException">Thrown in debug builds if the receiver has been deleted or called from a multithreaded context.</exception>
         [MethodImpl(AggressiveInlining)]
-        public void ReadAll(World<TWorld>.EventAction<TEvent> action) {
+        public int ReadAll(World<TWorld>.EventAction<TEvent> action) {
             #if FFS_ECS_DEBUG
             if (Id < 0) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.ReadAll ] receiver is deleted");
             if (World<TWorld>.Data.Instance.MultiThreadActive) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.ReadAll ] this operation is not supported in multithreaded mode");
             #endif
-            World<TWorld>.Events<TEvent>.Instance.ReadAll(Id, action);
+            return World<TWorld>.Events<TEvent>.Instance.ReadAll(Id, action);
         }
 
         /// <summary>
@@ -1129,14 +1320,18 @@ namespace FFS.Libraries.StaticEcs {
         /// without iterating through each one.
         /// </para>
         /// </summary>
+        /// <returns>
+        /// The number of events actually marked as read by this call. Events already suppressed
+        /// by another receiver are not counted.
+        /// </returns>
         /// <exception cref="StaticEcsException">Thrown in debug builds if the receiver has been deleted or called from a multithreaded context.</exception>
         [MethodImpl(AggressiveInlining)]
-        public void MarkAsReadAll() {
+        public int MarkAsReadAll() {
             #if FFS_ECS_DEBUG
             if (Id < 0) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.MarkAsReadAll ] receiver is deleted");
             if (World<TWorld>.Data.Instance.MultiThreadActive) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.MarkAsReadAl ] this operation is not supported in multithreaded mode");
             #endif
-            World<TWorld>.Events<TEvent>.Instance.ReadAll(Id);
+            return World<TWorld>.Events<TEvent>.Instance.ReadAll(Id);
         }
 
         /// <summary>
@@ -1152,14 +1347,18 @@ namespace FFS.Libraries.StaticEcs {
         /// remove events from every other receiver's queue. Use only when you need to cancel
         /// events globally (e.g., invalidating a batch of obsolete notifications).
         /// </remarks>
+        /// <returns>
+        /// The number of events actually suppressed by this call. Events already suppressed
+        /// earlier (by another receiver or a previous call) are not counted.
+        /// </returns>
         /// <exception cref="StaticEcsException">Thrown in debug builds if the receiver has been deleted or called from a multithreaded context.</exception>
         [MethodImpl(AggressiveInlining)]
-        public void SuppressAll() {
+        public int SuppressAll() {
             #if FFS_ECS_DEBUG
             if (Id < 0) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.SuppressAll ] receiver is deleted");
             if (World<TWorld>.Data.Instance.MultiThreadActive) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.SuppressAll ] this operation is not supported in multithreaded mode");
             #endif
-            World<TWorld>.Events<TEvent>.Instance.SuppressAll(Id);
+            return World<TWorld>.Events<TEvent>.Instance.SuppressAll(Id);
         }
 
         /// <summary>
@@ -1181,6 +1380,57 @@ namespace FFS.Libraries.StaticEcs {
             if (World<TWorld>.Events<TEvent>.Instance.IsBlocked()) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.GetEnumerator ] event pool is blocked");
             #endif
             return new World<TWorld>.EventIterator<TEvent>(Id);
+        }
+
+        /// <summary>
+        /// Returns a zero-allocation enumerator that <b>peeks</b> unread events without consuming them.
+        /// <para>
+        /// Neither the receiver's read cursor nor the per-event <c>UnreadReceiversCount</c> are
+        /// modified. Repeated <c>foreach (var e in receiver.Peek())</c> yields the same set of events.
+        /// Useful for multi-pass handling, dry-run/diagnostics, or reading queued state without
+        /// committing to consumption.
+        /// </para>
+        /// </summary>
+        /// <returns>A <see cref="World{TWorld}.PeekIterator{TEvent}"/> for <c>foreach</c> use.</returns>
+        /// <exception cref="StaticEcsException">Thrown in debug builds if the receiver has been deleted, called from a multithreaded context, or the pool is already being iterated.</exception>
+        [MethodImpl(AggressiveInlining)]
+        public World<TWorld>.PeekIterator<TEvent> Peek() {
+            #if FFS_ECS_DEBUG
+            if (Id < 0) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.Peek ] receiver is deleted");
+            if (World<TWorld>.Data.Instance.MultiThreadActive) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.Peek ] this operation is not supported in multithreaded mode");
+            if (World<TWorld>.Events<TEvent>.Instance.IsBlocked()) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.Peek ] event pool is blocked");
+            #endif
+            return new World<TWorld>.PeekIterator<TEvent>(Id);
+        }
+
+        /// <summary>
+        /// Returns a zero-allocation enumerator that walks all unread events and yields <b>only
+        /// those for which this receiver is the last unread reader</b> (equivalent to
+        /// <see cref="World{TWorld}.Event{TEvent}.IsLastReading"/> returning <c>true</c>),
+        /// automatically consuming each yielded event.
+        /// <para>
+        /// Events still pending other receivers are skipped without modifying their state — they
+        /// remain reachable on later passes. The receiver's read cursor advances only as long as
+        /// every preceding event is already done (consumed by all or yielded here); once the walk
+        /// crosses an unprocessed event the cursor stops there, but the iterator keeps scanning
+        /// forward to find later events where this receiver is already last.
+        /// </para>
+        /// <para>
+        /// <b>Constraint:</b> only one receiver per event type should call <see cref="LastOnly"/>.
+        /// Two would deadlock — each waits for the other to consume first, neither ever does. This
+        /// is the user's responsibility to ensure; the framework does not validate it.
+        /// </para>
+        /// </summary>
+        /// <returns>A <see cref="World{TWorld}.LastOnlyIterator{TEvent}"/> for <c>foreach</c> use.</returns>
+        /// <exception cref="StaticEcsException">Thrown in debug builds if the receiver has been deleted, called from a multithreaded context, or the pool is already being iterated.</exception>
+        [MethodImpl(AggressiveInlining)]
+        public World<TWorld>.LastOnlyIterator<TEvent> LastOnly() {
+            #if FFS_ECS_DEBUG
+            if (Id < 0) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.LastOnly ] receiver is deleted");
+            if (World<TWorld>.Data.Instance.MultiThreadActive) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.LastOnly ] this operation is not supported in multithreaded mode");
+            if (World<TWorld>.Events<TEvent>.Instance.IsBlocked()) throw new StaticEcsException($"[ World<{typeof(TWorld)}>.EventReceiver<{typeof(TEvent)}>.LastOnly ] event pool is blocked");
+            #endif
+            return new World<TWorld>.LastOnlyIterator<TEvent>(Id);
         }
     }
     

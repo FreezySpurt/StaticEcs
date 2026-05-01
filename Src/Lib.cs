@@ -43,6 +43,7 @@ namespace FFS.Libraries.StaticEcs {
     public unsafe struct Block<T> where T : unmanaged {
         #if FFS_ECS_BURST
         [Unity.Collections.LowLevel.Unsafe.NativeDisableUnsafePtrRestriction]
+        [Unity.Burst.NoAlias]
         #endif
         public T* Ptr;
         #if FFS_ECS_DEBUG
@@ -75,6 +76,7 @@ namespace FFS.Libraries.StaticEcs {
     public unsafe struct BlockR<T> where T : unmanaged {
         #if FFS_ECS_BURST
         [Unity.Collections.LowLevel.Unsafe.NativeDisableUnsafePtrRestriction]
+        [Unity.Burst.NoAlias]
         #endif
         public readonly T* Ptr;
         #if FFS_ECS_DEBUG
@@ -368,7 +370,7 @@ namespace FFS.Libraries.StaticEcs {
         }
         
         internal static void AssertNotRegisteredComponent<T>(string type, [CallerMemberName] string method = "") where T : struct, IComponentOrTag {
-            if (Components<T>.Instance.IsRegistered) {
+            if (Components<T>.instance.IsRegistered) {
                 throw new StaticEcsException(type, method, $"Component {typeof(T).GenericName()} already registered.");
             }
         }
@@ -385,28 +387,39 @@ namespace FFS.Libraries.StaticEcs {
             }
         }
 
-        internal static void AssertRegisteredComponent<T>(string type, [CallerMemberName] string method = "") where T : struct, IComponentOrTag {
-            if (!Components<T>.Instance.IsRegistered) {
-                throw new StaticEcsException(type, method, $"Component {typeof(T).GenericName()} is not registered.");
+        internal static void AssertInternalSetValueIsDefault<T>(T value, string type, [CallerMemberName] string method = "") where T : struct, IComponentOrTag {
+            if (Components<T>.Instance.IsInternal && !System.Collections.Generic.EqualityComparer<T>.Default.Equals(value, default)) {
+                throw new StaticEcsException(type, method,
+                    $"Cannot Set non-default value of internal handle component {typeof(T).GenericName()}. "
+                    + "Multi<>/Links<> manage their own storage in OnAdd — copying a non-default handle would alias or leak data. "
+                    + "Set(entity, default) is allowed (resets to a fresh empty state). "
+                    + "To transfer data from one entity to another use CopyTo (entity-to-entity component copy invokes the type's CopyTo hook, which clones backing storage); "
+                    + "to populate a freshly created component use Add() and then append elements via the component's API (e.g. Multi<T>.Add(value)).");
             }
         }
 
         internal static void AssertComponentTrackAdded<T>(string type, [CallerMemberName] string method = "") where T : struct, IComponentOrTag {
             if (!Components<T>.Instance.TrackAdded) {
-                throw new StaticEcsException(type, method, $"Component {typeof(T).GenericName()} does not have TrackAdded enabled.");
+                throw new StaticEcsException(type, method, $"Component {typeof(T).GenericName()} does not implement ITrackableAdded.");
             }
         }
 
         internal static void AssertComponentTrackDeleted<T>(string type, [CallerMemberName] string method = "") where T : struct, IComponentOrTag {
             if (!Components<T>.Instance.TrackDeleted) {
-                throw new StaticEcsException(type, method, $"Component {typeof(T).GenericName()} does not have TrackDeleted enabled.");
+                throw new StaticEcsException(type, method, $"Component {typeof(T).GenericName()} does not implement ITrackableDeleted.");
+            }
+        }
+
+        internal static void AssertComponentDisableable<T>(string type, [CallerMemberName] string method = "") where T : struct, IComponentOrTag {
+            if (!Components<T>.Instance.HasDisable) {
+                throw new StaticEcsException(type, method, $"Component {typeof(T).GenericName()} does not implement IDisableable.");
             }
         }
 
         #if !FFS_ECS_DISABLE_CHANGED_TRACKING
         internal static void AssertComponentTrackChanged<T>(string type, [CallerMemberName] string method = "") where T : struct, IComponentOrTag {
             if (!Components<T>.Instance.TrackChanged) {
-                throw new StaticEcsException(type, method, $"Component {typeof(T).GenericName()} does not have TrackChanged enabled.");
+                throw new StaticEcsException(type, method, $"Component {typeof(T).GenericName()} does not implement ITrackableChanged.");
             }
         }
         #endif
@@ -458,13 +471,7 @@ namespace FFS.Libraries.StaticEcs {
         
         internal static void AssertNotBlockedByQuery(string type, Entity entity, int blocker, [CallerMemberName] string method = "") {
             if (blocker > 0 && Data.Instance.IsNotCurrentQueryEntity(entity)) {
-                throw new StaticEcsException(type, method, $"Operation is blocked, it is forbidden to modify a non-current {entity} in a {nameof(QueryMode)}{QueryMode.Strict} query, use {nameof(QueryMode)}{QueryMode.Flexible}.");
-            }
-        }
-        
-        internal static void AssertNotBlockedByQuery(string type, int blocker, [CallerMemberName] string method = "") {
-            if (blocker > 0) {
-                throw new StaticEcsException(type, method, $"Operation is blocked, it is forbidden to modify a non-current entity in a {nameof(QueryMode)}{QueryMode.Strict} query, use {nameof(QueryMode)}{QueryMode.Flexible}.");
+                throw new StaticEcsException(type, method, $"Operation is blocked, it is forbidden to modify a non-current {entity} that belongs to the iteration snapshot in a {nameof(QueryMode)}{QueryMode.Strict} query (entities created mid-iteration or not matching the filter are allowed); use {nameof(QueryMode)}{QueryMode.Flexible} for entity-level destroy/disable/enable on other snapshot entities.");
             }
         }
         
@@ -935,6 +942,10 @@ namespace FFS.Libraries.StaticEcs {
         [UnconditionalSuppressMessage("Trimming", "IL2037", Justification = "UnmanagedPackArrayStrategy<T> constructor is preserved by DynamicDependency.")]
         #endif
         internal static IPackArrayStrategy<T> TryCreateUnmanagedPackArrayStrategy<T>() where T : struct {
+            if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) {
+                return null;
+            }
+            
             try {
                 var unmanagedPackStrategyType = typeof(UnmanagedPackArrayStrategy<>).MakeGenericType(typeof(T));
                 return (IPackArrayStrategy<T>)Activator.CreateInstance(unmanagedPackStrategyType);
@@ -952,6 +963,10 @@ namespace FFS.Libraries.StaticEcs {
         internal static IPackArrayStrategy<World<TWorld>.Multi<TValue>> TryCreateUnmanagedMultiPackArrayStrategy<TWorld, TValue>() 
             where TValue : struct, IMultiComponent 
             where TWorld : struct, IWorldType {
+            if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>()) {
+                return null;
+            }
+            
             try {
                 var unmanagedPackStrategyType = typeof(MultiUnmanagedPackArrayStrategy<,>).MakeGenericType(typeof(TWorld), typeof(TValue));
                 return (IPackArrayStrategy<World<TWorld>.Multi<TValue>>)Activator.CreateInstance(unmanagedPackStrategyType);

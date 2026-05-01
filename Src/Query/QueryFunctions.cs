@@ -837,8 +837,11 @@ namespace FFS.Libraries.StaticEcs {
     /// <para>
     /// This is the most versatile delegate form. The entity parameter provides the full
     /// <see cref="World{TWorld}.Entity"/> API surface. Note that structural changes (Add/Delete/Destroy)
-    /// on the current entity during iteration are safe, but modifying filtered types on OTHER entities
-    /// requires <see cref="QueryMode.Flexible"/>.
+    /// on the current entity during iteration are safe, and operations on entities outside the iteration
+    /// snapshot (created mid-iteration or not matching the filter) are also allowed. Modifying filtered
+    /// component/tag types on other snapshot entities is forbidden in both <see cref="QueryMode.Strict"/>
+    /// and <see cref="QueryMode.Flexible"/>; entity-level destroy/disable/enable on other snapshot
+    /// entities requires <see cref="QueryMode.Flexible"/>.
     /// </para>
     /// </summary>
     /// <typeparam name="TWorld">The world type.</typeparam>

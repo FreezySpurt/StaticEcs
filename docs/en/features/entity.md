@@ -301,6 +301,21 @@ Entity relations API is described in the [Relations](relations.md) section.
 
 ___
 
+## Query filter check
+
+`IsMatch<TFilter>` tests whether an entity passes the same filter used by `Query<TFilter>`.
+
+```csharp
+// Check by filter type
+bool ok = entity.IsMatch<All<Position, Velocity>>();
+
+// Pass a filter value — handy for composite And/Or
+var filter = And.By(default(None<Stunned>), default(All<Player>));
+bool ready = entity.IsMatch(filter);
+```
+
+___
+
 ## Debugging
 
 ```csharp
