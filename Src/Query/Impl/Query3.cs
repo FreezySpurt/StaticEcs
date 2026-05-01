@@ -4510,6 +4510,10 @@ namespace FFS.Libraries.StaticEcs {
                             ulong[] pool1Masks = null;
                             ulong[] pool2Masks = null;
 
+                            var pool0HasDisable = pool0.HasDisable;
+                            var pool1HasDisable = pool1.HasDisable;
+                            var pool2HasDisable = pool2.HasDisable;
+
                             do {
                                 #if NET6_0_OR_GREATER
                                 var chunkBlockIdx = (uint)System.Numerics.BitOperations.TrailingZeroCount(chunkMask);
@@ -4538,12 +4542,12 @@ namespace FFS.Libraries.StaticEcs {
                                     _ => worldMasks[loadedBlockIdx] & worldMasks[blockIdx]
                                 };
                                 entitiesMask &= components switch {
-                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & ~pool0Masks[disabledBlockIdx]
-                                                                & pool1Masks[blockIdx] & ~pool1Masks[disabledBlockIdx]
-                                                                & pool2Masks[blockIdx] & ~pool2Masks[disabledBlockIdx],
-                                    ComponentStatus.Disabled => pool0Masks[disabledBlockIdx]
-                                                                & pool1Masks[disabledBlockIdx]
-                                                                & pool2Masks[disabledBlockIdx],
+                                    ComponentStatus.Enabled => pool0Masks[blockIdx] &    (pool0HasDisable ? ~pool0Masks[disabledBlockIdx] : ulong.MaxValue)
+                                                                & pool1Masks[blockIdx] & (pool1HasDisable ? ~pool1Masks[disabledBlockIdx] : ulong.MaxValue)
+                                                                & pool2Masks[blockIdx] & (pool2HasDisable ? ~pool2Masks[disabledBlockIdx] : ulong.MaxValue),
+                                    ComponentStatus.Disabled =>   (pool0HasDisable ? pool0Masks[disabledBlockIdx] : 0)
+                                                                & (pool1HasDisable ? pool1Masks[disabledBlockIdx] : 0)
+                                                                & (pool2HasDisable ? pool2Masks[disabledBlockIdx] : 0),
                                     _ => pool0Masks[blockIdx]
                                          & pool1Masks[blockIdx]
                                          & pool2Masks[blockIdx]
@@ -4624,6 +4628,10 @@ namespace FFS.Libraries.StaticEcs {
                             ulong[] pool1Masks = null;
                             ulong[] pool2Masks = null;
 
+                            var pool0HasDisable = pool0.HasDisable;
+                            var pool1HasDisable = pool1.HasDisable;
+                            var pool2HasDisable = pool2.HasDisable;
+
                             do {
                                 #if NET6_0_OR_GREATER
                                 var chunkBlockIdx = (uint)System.Numerics.BitOperations.TrailingZeroCount(chunkMask);
@@ -4652,12 +4660,12 @@ namespace FFS.Libraries.StaticEcs {
                                     _ => worldMasks[loadedBlockIdx] & worldMasks[blockIdx]
                                 };
                                 entitiesMask &= components switch {
-                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & ~pool0Masks[disabledBlockIdx]
-                                                                & pool1Masks[blockIdx] & ~pool1Masks[disabledBlockIdx]
-                                                                & pool2Masks[blockIdx] & ~pool2Masks[disabledBlockIdx],
-                                    ComponentStatus.Disabled => pool0Masks[disabledBlockIdx]
-                                                                & pool1Masks[disabledBlockIdx]
-                                                                & pool2Masks[disabledBlockIdx],
+                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & (pool0HasDisable ? ~pool0Masks[disabledBlockIdx] : ulong.MaxValue)
+                                                                                    & pool1Masks[blockIdx] & (pool1HasDisable ? ~pool1Masks[disabledBlockIdx] : ulong.MaxValue)
+                                                                                    & pool2Masks[blockIdx] & (pool2HasDisable ? ~pool2Masks[disabledBlockIdx] : ulong.MaxValue),
+                                    ComponentStatus.Disabled => (pool0HasDisable ? pool0Masks[disabledBlockIdx] : 0)
+                                                                & (pool1HasDisable ? pool1Masks[disabledBlockIdx] : 0)
+                                                                & (pool2HasDisable ? pool2Masks[disabledBlockIdx] : 0),
                                     _ => pool0Masks[blockIdx]
                                          & pool1Masks[blockIdx]
                                          & pool2Masks[blockIdx]

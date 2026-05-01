@@ -3595,6 +3595,8 @@ namespace FFS.Libraries.StaticEcs {
                             ulong[] worldMasks = null;
                             ulong[] pool0Masks = null;
 
+                            var pool0HasDisable = pool0.HasDisable;
+
                             do {
                                 #if NET6_0_OR_GREATER
                                 var chunkBlockIdx = (uint)System.Numerics.BitOperations.TrailingZeroCount(chunkMask);
@@ -3621,8 +3623,8 @@ namespace FFS.Libraries.StaticEcs {
                                     _ => worldMasks[loadedBlockIdx] & worldMasks[blockIdx]
                                 };
                                 entitiesMask &= components switch {
-                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & ~pool0Masks[disabledBlockIdx],
-                                    ComponentStatus.Disabled => pool0Masks[disabledBlockIdx],
+                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & (pool0HasDisable ? ~pool0Masks[disabledBlockIdx] : ulong.MaxValue),
+                                    ComponentStatus.Disabled => (pool0HasDisable ? pool0Masks[disabledBlockIdx] : 0),
                                     _ => pool0Masks[blockIdx]
                                 };
                                 entitiesMask &= filter.FilterEntities<TWorld>(segmentIdx, blockIdx);
@@ -3693,6 +3695,8 @@ namespace FFS.Libraries.StaticEcs {
                             ulong[] worldMasks = null;
                             ulong[] pool0Masks = null;
 
+                            var pool0HasDisable = pool0.HasDisable;
+
                             do {
                                 #if NET6_0_OR_GREATER
                                 var chunkBlockIdx = (uint)System.Numerics.BitOperations.TrailingZeroCount(chunkMask);
@@ -3719,8 +3723,8 @@ namespace FFS.Libraries.StaticEcs {
                                     _ => worldMasks[loadedBlockIdx] & worldMasks[blockIdx]
                                 };
                                 entitiesMask &= components switch {
-                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & ~pool0Masks[disabledBlockIdx],
-                                    ComponentStatus.Disabled => pool0Masks[disabledBlockIdx],
+                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & (pool0HasDisable ? ~pool0Masks[disabledBlockIdx] : ulong.MaxValue),
+                                    ComponentStatus.Disabled => (pool0HasDisable ? pool0Masks[disabledBlockIdx] : 0),
                                     _ => pool0Masks[blockIdx]
                                 };
                                 entitiesMask &= filter.FilterEntities<TWorld>(segmentIdx, blockIdx);

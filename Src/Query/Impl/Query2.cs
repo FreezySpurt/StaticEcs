@@ -4045,6 +4045,9 @@ namespace FFS.Libraries.StaticEcs {
                             ulong[] pool0Masks = null;
                             ulong[] pool1Masks = null;
 
+                            var pool0HasDisable = pool0.HasDisable;
+                            var pool1HasDisable = pool1.HasDisable;
+
                             do {
                                 #if NET6_0_OR_GREATER
                                 var chunkBlockIdx = (uint)System.Numerics.BitOperations.TrailingZeroCount(chunkMask);
@@ -4072,10 +4075,10 @@ namespace FFS.Libraries.StaticEcs {
                                     _ => worldMasks[loadedBlockIdx] & worldMasks[blockIdx]
                                 };
                                 entitiesMask &= components switch {
-                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & ~pool0Masks[disabledBlockIdx]
-                                                                & pool1Masks[blockIdx] & ~pool1Masks[disabledBlockIdx],
-                                    ComponentStatus.Disabled => pool0Masks[disabledBlockIdx]
-                                                                & pool1Masks[disabledBlockIdx],
+                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & (pool0HasDisable ? ~pool0Masks[disabledBlockIdx] : ulong.MaxValue)
+                                                                                    & pool1Masks[blockIdx] & (pool1HasDisable ? ~pool1Masks[disabledBlockIdx] : ulong.MaxValue),
+                                    ComponentStatus.Disabled => (pool0HasDisable ? pool0Masks[disabledBlockIdx] : 0)
+                                                                & (pool1HasDisable ? pool1Masks[disabledBlockIdx] : 0),
                                     _ => pool0Masks[blockIdx]
                                          & pool1Masks[blockIdx]
                                 };
@@ -4151,6 +4154,9 @@ namespace FFS.Libraries.StaticEcs {
                             ulong[] pool0Masks = null;
                             ulong[] pool1Masks = null;
 
+                            var pool0HasDisable = pool0.HasDisable;
+                            var pool1HasDisable = pool1.HasDisable;
+
                             do {
                                 #if NET6_0_OR_GREATER
                                 var chunkBlockIdx = (uint)System.Numerics.BitOperations.TrailingZeroCount(chunkMask);
@@ -4178,10 +4184,10 @@ namespace FFS.Libraries.StaticEcs {
                                     _ => worldMasks[loadedBlockIdx] & worldMasks[blockIdx]
                                 };
                                 entitiesMask &= components switch {
-                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & ~pool0Masks[disabledBlockIdx]
-                                                                & pool1Masks[blockIdx] & ~pool1Masks[disabledBlockIdx],
-                                    ComponentStatus.Disabled => pool0Masks[disabledBlockIdx]
-                                                                & pool1Masks[disabledBlockIdx],
+                                    ComponentStatus.Enabled => pool0Masks[blockIdx] & (pool0HasDisable ? ~pool0Masks[disabledBlockIdx] : ulong.MaxValue)
+                                                                                    & pool1Masks[blockIdx] & (pool1HasDisable ? ~pool1Masks[disabledBlockIdx] : ulong.MaxValue),
+                                    ComponentStatus.Disabled => (pool0HasDisable ? pool0Masks[disabledBlockIdx] : 0)
+                                                                & (pool1HasDisable ? pool1Masks[disabledBlockIdx] : 0),
                                     _ => pool0Masks[blockIdx]
                                          & pool1Masks[blockIdx]
                                 };
