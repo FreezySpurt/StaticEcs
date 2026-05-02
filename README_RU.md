@@ -5,7 +5,7 @@
   <a href="./README_RU.md"><img src="https://img.shields.io/badge/RU-Русский-blue?style=flat-square" alt="Русский"></a>
   <a href="./README_ZH.md"><img src="https://img.shields.io/badge/ZH-中文-blue?style=flat-square" alt="中文"></a>
   <br><br>
-  <img src="https://img.shields.io/badge/version-2.2.0-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.1-blue?style=for-the-badge" alt="Version">
   <a href="https://www.nuget.org/packages/FFS.StaticEcs/"><img src="https://img.shields.io/badge/NuGet-FFS.StaticEcs-004880?style=for-the-badge&logo=nuget" alt="NuGet"></a>
   <a href="https://felid-force-studios.github.io/StaticEcs/ru/"><img src="https://img.shields.io/badge/Docs-документация-blueviolet?style=for-the-badge" alt="Документация"></a>
   <a href="https://gist.github.com/blackbone/6d254a684cf580441bf58690ad9485c3"><img src="https://img.shields.io/badge/Benchmarks-результаты-green?style=for-the-badge" alt="Benchmarks"></a>
@@ -76,7 +76,7 @@
 <a href="https://www.buymeacoffee.com/felid.force.studios" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="60"></a>
 
 # Установка
-Библиотека имеет зависимость на [StaticPack](https://github.com/Felid-Force-Studios/StaticPack) версии `1.1.0` для бинарной сериализации, StaticPack должен быть так же установлен
+Библиотека имеет зависимость на [StaticPack](https://github.com/Felid-Force-Studios/StaticPack) версии `1.2.5` для бинарной сериализации, StaticPack должен быть так же установлен
 * ### В виде исходников
   Со страницы релизов или как архив из нужной ветки. В ветке `master` стабильная проверенная версия
 * ### Установка для Unity

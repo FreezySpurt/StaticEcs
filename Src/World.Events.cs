@@ -925,14 +925,18 @@ namespace FFS.Libraries.StaticEcs {
                         writer.WriteUint(curPageIdx);
                         writer.WriteUshort(page.Version);
                         writer.WriteArrayUnmanaged(page.Mask);
-                        writer.WriteArrayUnmanaged(page.UnreadReceiversCount);
-                        if (isUnmanaged) {
-                            _readWriteArrayStrategy.WriteArray(ref writer, page.EventsData);
-                        }
-                        else {
-                            for (var eIdx = 0; eIdx < EVENTS_PER_PAGE; eIdx++) {
-                                if ((page.Mask[eIdx >> EVENT_IN_PAGE_MASK_SHIFT] & (1L << (eIdx & EVENT_IN_PAGE_OFFSET_MASK))) != 0) {
-                                    writer.Write(in page.EventsData[eIdx]);
+                        for (var maskIdx = 0; maskIdx < MASKS_IN_PAGE; maskIdx++) {
+                            var bits = (ulong) page.Mask[maskIdx];
+                            if (bits == 0) continue;
+                            var baseIdx = maskIdx << EVENT_IN_PAGE_MASK_SHIFT;
+                            writer.WriteArrayUnmanaged(page.UnreadReceiversCount, baseIdx, Const.U64_BITS);
+                            if (isUnmanaged) {
+                                _readWriteArrayStrategy.WriteArray(ref writer, page.EventsData, baseIdx, Const.U64_BITS);
+                            }
+                            else {
+                                while (bits != 0) {
+                                    var bit = Utils.PopLsb(ref bits);
+                                    writer.Write(in page.EventsData[baseIdx + bit]);
                                 }
                             }
                         }
@@ -981,34 +985,43 @@ namespace FFS.Libraries.StaticEcs {
                         }
 
                         reader.ReadArrayUnmanaged(ref page.Mask);
-                        reader.ReadArrayUnmanaged(ref page.UnreadReceiversCount);
-                        if (Version == oldVersion) {
-                            if (isUnmanaged) {
-                                _readWriteArrayStrategy.ReadArray(ref reader, ref page.EventsData);
-                            }
-                            else {
-                                for (var eIdx = 0; eIdx < EVENTS_PER_PAGE; eIdx++) {
-                                    if ((page.Mask[eIdx >> EVENT_IN_PAGE_MASK_SHIFT] & (1L << (eIdx & EVENT_IN_PAGE_OFFSET_MASK))) != 0) {
-                                        page.EventsData[eIdx].Read(ref reader, oldVersion);
+                        Array.Clear(page.UnreadReceiversCount, 0, EVENTS_PER_PAGE);
+                        for (var maskIdx = 0; maskIdx < MASKS_IN_PAGE; maskIdx++) {
+                            var bits = (ulong) page.Mask[maskIdx];
+                            if (bits == 0) continue;
+                            var baseIdx = maskIdx << EVENT_IN_PAGE_MASK_SHIFT;
+                            reader.ReadArrayUnmanaged(ref page.UnreadReceiversCount, baseIdx);
+                            if (Version == oldVersion) {
+                                if (isUnmanaged) {
+                                    _readWriteArrayStrategy.ReadArray(ref reader, ref page.EventsData, baseIdx);
+                                }
+                                else {
+                                    while (bits != 0) {
+                                        var bit = Utils.PopLsb(ref bits);
+                                        page.EventsData[baseIdx + bit].Read(ref reader, oldVersion);
                                     }
                                 }
                             }
-                        }
-                        else {
-                            uint oneSize = default;
-                            if (isUnmanaged) {
-                                _ = reader.ReadNullFlag();
-                                var size = reader.ReadInt();
-                                var byteSize = reader.ReadUint();
-                                oneSize = (uint)(byteSize / size);
-                            }
-
-                            for (var eIdx = 0; eIdx < EVENTS_PER_PAGE; eIdx++) {
-                                if ((page.Mask[eIdx >> EVENT_IN_PAGE_MASK_SHIFT] & (1L << (eIdx & EVENT_IN_PAGE_OFFSET_MASK))) != 0) {
-                                    page.EventsData[eIdx].Read(ref reader, oldVersion);
+                            else {
+                                if (isUnmanaged) {
+                                    _ = reader.ReadNullFlag();
+                                    _ = reader.ReadInt();
+                                    var byteSize = reader.ReadUint();
+                                    var oneSize = byteSize / Const.U64_BITS;
+                                    for (var slot = 0; slot < Const.U64_BITS; slot++) {
+                                        if (((bits >> slot) & 1UL) != 0) {
+                                            page.EventsData[baseIdx + slot].Read(ref reader, oldVersion);
+                                        }
+                                        else {
+                                            reader.SkipNext(oneSize);
+                                        }
+                                    }
                                 }
-                                else if (isUnmanaged) {
-                                    reader.SkipNext(oneSize);
+                                else {
+                                    while (bits != 0) {
+                                        var bit = Utils.PopLsb(ref bits);
+                                        page.EventsData[baseIdx + bit].Read(ref reader, oldVersion);
+                                    }
                                 }
                             }
                         }

@@ -311,9 +311,9 @@ public class SpawnerSystem : ISystem {
 byte[] snapshot = W.Serializer.CreateSystemsSnapshot();
 W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
 
-// Загрузить
+// Загрузить (gzip определяется автоматически)
 W.Serializer.LoadSystemsSnapshot(snapshot);
-W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+W.Serializer.LoadSystemsSnapshot("systems.bin");
 ```
 
 Полные детали формата и миграции: см. [Сериализация → Сериализация систем](./serialization.md).

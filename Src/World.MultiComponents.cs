@@ -888,6 +888,7 @@ namespace FFS.Libraries.StaticEcs {
                     storage.ElementStrategy = ElementStrategy ?? AutoRegistration.TryCreateUnmanagedPackArrayStrategy<TValue>() ?? new StructPackArrayStrategy<TValue>();
                     World<TW>.Data.Instance.RegisterMultiStorageResizer(_ResizeStorage);
                     World<TW>.Data.Instance.RegisterMultiStorageResetter(_ResetStorage);
+                    World<TW>.Data.Instance.RegisterMultiStorageChunkResetter(_ResetStorageChunk);
                 }
             }
 
@@ -923,6 +924,18 @@ namespace FFS.Libraries.StaticEcs {
                 for (var i = 0; i < storage.Segments.Length; i++) {
                     if (storage.Segments[i] != null) {
                         storage.ReleaseSegment((uint)i);
+                    }
+                }
+            }
+
+            private static void _ResetStorageChunk(uint chunkIdx) {
+                ref var storage = ref Resources<TWorld, MultiValueStorage<TValue>>.Value;
+                if (storage.Segments == null) return;
+                var baseSegmentIdx = chunkIdx << Const.SEGMENTS_IN_CHUNK_SHIFT;
+                for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
+                    var segIdx = baseSegmentIdx + (uint)s;
+                    if (segIdx < storage.Segments.Length && storage.Segments[segIdx] != null) {
+                        storage.ReleaseSegment(segIdx);
                     }
                 }
             }

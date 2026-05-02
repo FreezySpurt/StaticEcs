@@ -238,11 +238,11 @@ W.Serializer.CreateWorldSnapshot(writeEvents: false);
 // 不包含自定义数据
 W.Serializer.CreateWorldSnapshot(withCustomSnapshotData: false);
 
-// 从文件加载
+// 从文件加载（自动检测 gzip）
 W.Serializer.LoadWorldSnapshot("path/to/world.bin");
 
-// 加载压缩数据
-W.Serializer.LoadWorldSnapshot(compressed, gzip: true);
+// 加载压缩数据（自动检测 gzip）
+W.Serializer.LoadWorldSnapshot(compressed);
 ```
 
 {: .importantzh }
@@ -734,7 +734,7 @@ W.Serializer.CreateResourcesSnapshot("resources.bin", gzip: true);
 
 // 加载
 W.Serializer.LoadResourcesSnapshot(snapshot);
-W.Serializer.LoadResourcesSnapshot("resources.bin", gzip: true);
+W.Serializer.LoadResourcesSnapshot("resources.bin");
 ```
 
 加载时，当前未注册的 `Guid` 条目会被静默跳过（与已删除的组件或事件相同）— 在保存和加载之间添加或删除资源类型是向前兼容的。
@@ -809,7 +809,7 @@ W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
 
 // 加载
 W.Serializer.LoadSystemsSnapshot(snapshot);
-W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+W.Serializer.LoadSystemsSnapshot("systems.bin");
 ```
 
 每个组段包含其作用域内的资源（singleton + named），然后是组内每个声明 `Guid` 的系统。
@@ -833,29 +833,37 @@ ___
 
 ## 压缩（GZIP）
 
-所有快照创建和加载方法都支持 GZIP 压缩：
+所有快照创建方法都通过 `gzip: true` 支持 GZIP 压缩。**所有**加载方法（`LoadWorldSnapshot`、`LoadClusterSnapshot`、`LoadChunkSnapshot`、`LoadEventsSnapshot`、`LoadResourcesSnapshot`、`LoadSystemsSnapshot`、`RestoreFromGIDStoreSnapshot`）都会从字节流中**自动检测** gzip — 直接传入字节或路径，不需要任何标志。
 
 ```csharp
-// 世界
+// 世界 — 加载时自动检测 gzip
 byte[] snapshot = W.Serializer.CreateWorldSnapshot(gzip: true);
-W.Serializer.LoadWorldSnapshot(snapshot, gzip: true);
+W.Serializer.LoadWorldSnapshot(snapshot);
 
-// 集群
+// 集群 — 加载时自动检测 gzip
 byte[] cluster = W.Serializer.CreateClusterSnapshot(1, gzip: true);
-W.Serializer.LoadClusterSnapshot(cluster, gzip: true);
+W.Serializer.LoadClusterSnapshot(cluster);
 
-// 块
+// 块 — 加载时自动检测 gzip
 byte[] chunk = W.Serializer.CreateChunkSnapshot(0, gzip: true);
-W.Serializer.LoadChunkSnapshot(chunk, gzip: true);
+W.Serializer.LoadChunkSnapshot(chunk);
 
 // GID Store
 byte[] gid = W.Serializer.CreateGIDStoreSnapshot(gzip: true);
 
-// 事件
+// 事件 — 加载时自动检测 gzip
 byte[] events = W.Serializer.CreateEventsSnapshot(gzip: true);
-W.Serializer.LoadEventsSnapshot(events, gzip: true);
+W.Serializer.LoadEventsSnapshot(events);
 
-// 文件
+// 资源 — 加载时自动检测 gzip
+byte[] resources = W.Serializer.CreateResourcesSnapshot(gzip: true);
+W.Serializer.LoadResourcesSnapshot(resources);
+
+// 系统 — 加载时自动检测 gzip
+byte[] systems = W.Serializer.CreateSystemsSnapshot(gzip: true);
+W.Serializer.LoadSystemsSnapshot(systems);
+
+// 文件 — 世界/集群/块/事件/资源/系统的加载会自动检测 gzip
 W.Serializer.CreateWorldSnapshot("world.bin", gzip: true);
-W.Serializer.LoadWorldSnapshot("world.bin", gzip: true);
+W.Serializer.LoadWorldSnapshot("world.bin");
 ```

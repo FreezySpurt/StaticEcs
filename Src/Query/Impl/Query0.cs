@@ -1988,7 +1988,9 @@ namespace FFS.Libraries.StaticEcs {
                 ref var world = ref Data.Instance;
 
                 world.PopCurrentQuery(queryData);
+                #if FFS_ECS_DEBUG
                 const int unblock = -1;
+                #endif
 
                 if (!strict) {
                     world.PopQueryDataForDestroy();

@@ -4,6 +4,62 @@ parent: EN
 nav_order: 5
 ---
 
+# Migration from 2.2.0 to 2.2.1
+
+## Snapshot loaders: gzip autodetected, `byteSizeHint` removed
+
+All standalone snapshot loaders — `LoadWorldSnapshot` / `LoadClusterSnapshot` / `LoadChunkSnapshot` / `LoadEventsSnapshot` / `LoadResourcesSnapshot` / `LoadSystemsSnapshot` / `RestoreFromGIDStoreSnapshot` — no longer take `gzip` or `byteSizeHint` parameters. Gzip is autodetected from the byte stream (RFC 1952 magic `0x1F 0x8B`) and the buffer size is read from the snapshot's 10-byte header (`ushort` format version + `ulong` payload size). All public `(ref BinaryPackWriter)` / `(BinaryPackReader)` overloads of `Create*Snapshot` / `Load*Snapshot` / `RestoreFromGIDStoreSnapshot` (events / resources / systems / GID-store) now write and consume that same header — composite scenarios that wrap one of these calls into a custom writer will see 10 extra bytes per block. The embedded serialization inside a world snapshot still uses an internal header-less path and is unchanged.
+
+```csharp
+// Before (2.2.0)
+W.Serializer.LoadWorldSnapshot(bytes, gzip: true, hardReset: true);
+W.Serializer.LoadWorldSnapshot("world.bin", gzip: true, byteSizeHint: 1_000_000, hardReset: true);
+W.Serializer.LoadClusterSnapshot(bytes, gzip: true, entitiesAsNew);
+W.Serializer.LoadChunkSnapshot("chunk.bin", gzip: true, byteSizeHint: 0);
+W.Serializer.LoadEventsSnapshot(bytes, gzip: true);
+W.Serializer.LoadEventsSnapshot("events.bin", gzip: true, byteSizeHint: 4096);
+W.Serializer.LoadResourcesSnapshot(bytes, gzip: true);
+W.Serializer.LoadResourcesSnapshot("resources.bin", gzip: true, byteSizeHint: 4096);
+W.Serializer.LoadSystemsSnapshot(bytes, gzip: true);
+W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true, byteSizeHint: 4096);
+W.Serializer.RestoreFromGIDStoreSnapshot(bytes, gzip: true, hardReset: true);
+W.Serializer.RestoreFromGIDStoreSnapshot("gid.bin", gzip: true, byteSizeHint: 0, hardReset: true);
+
+// After (2.2.1)
+W.Serializer.LoadWorldSnapshot(bytes, hardReset: true);
+W.Serializer.LoadWorldSnapshot("world.bin", hardReset: true);
+W.Serializer.LoadClusterSnapshot(bytes, entitiesAsNew);
+W.Serializer.LoadChunkSnapshot("chunk.bin");
+W.Serializer.LoadEventsSnapshot(bytes);
+W.Serializer.LoadEventsSnapshot("events.bin");
+W.Serializer.LoadResourcesSnapshot(bytes);
+W.Serializer.LoadResourcesSnapshot("resources.bin");
+W.Serializer.LoadSystemsSnapshot(bytes);
+W.Serializer.LoadSystemsSnapshot("systems.bin");
+W.Serializer.RestoreFromGIDStoreSnapshot(bytes, hardReset: true);
+W.Serializer.RestoreFromGIDStoreSnapshot("gid.bin", hardReset: true);
+```
+
+## `LoadClusterSnapshot` validates target chunks
+
+Loading a cluster snapshot with `entitiesAsNew: false` into chunks that already contain active entities now throws `StaticEcsException` instead of silently corrupting state. Unload or destroy the entities in the target chunks before loading:
+
+```csharp
+ReadOnlySpan<ushort> targetClusters = stackalloc ushort[] { clusterId };
+W.Query().BatchUnload(EntityStatusType.Any, clusters: targetClusters);
+W.Serializer.LoadClusterSnapshot(snapshot); // entitiesAsNew: false
+```
+
+## Snapshot format version bumped to 2
+
+The world / cluster / chunk snapshot layout changed (sparse per-segment serialization gated by `UsedSegmentsMask`, sparse per-mask event-page serialization). `SnapshotFormatVersion` is now `2`. Snapshots produced by 2.2.0 cannot be loaded by 2.2.1 — re-save them once with a 2.2.0 build, then load in 2.2.1, or regenerate from authoritative game state.
+
+## StaticPack dependency: 1.1.0 → 1.2.5
+
+The `FFS.StaticPack` package reference was bumped to `1.2.5`. If you reference StaticPack directly from your projects, update the version. The new APIs `BinaryPackReader.RentAndFillFromBytes` / `RentAndFillFromFile` / `BinaryPackWriter.ForceWriteUnmanaged` / `BinaryPackReader.ForceReadUnmanaged` power the simplifications above.
+
+___
+
 # Migration from 2.1.x to 2.2.0
 
 ## Resources now require `IResource`
