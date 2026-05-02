@@ -2146,52 +2146,9 @@ namespace FFS.Libraries.StaticEcs {
                 var hasTracking = AnyTracking;
 
                 for (var i = 0; i < segCount; i++) {
-                    ref var masks = ref EntitiesMaskSegments[i];
-                    if (masks != null) {
-                        Array.Clear(masks, 0, SegmentMaskLen);
-                        
-                        if (!IsTag) {
-                            ref var components = ref ComponentSegments[i];
-                            if (HasDefaultValue) {
-                                components.AsSpan().Fill(DefaultValue);
-                            } else {
-                                Array.Clear(components, 0, Const.ENTITIES_IN_SEGMENT);
-                            }
-                            _componentsPool[_segmentsPoolCount] = components;
-                            components = null;
-                        }
-                        _segmentsPool[_segmentsPoolCount] = masks;
-                        masks = null;
-                        _segmentsPoolCount++;
-                        
-                        #if FFS_ECS_BURST
-                        LifecycleHandle.OnSegmentPooled((uint)i);
-                        #endif
-                    }
-
+                    ReleaseSegmentInternal(i);
                     if (hasTracking) {
-                        var bufferSize = Data.Instance.TrackingBufferSize;
-                        if (bufferSize > 0) {
-                            for (var slot = 0; slot < bufferSize + 1; slot++) {
-                                ref var trackingSeg = ref TrackingHistoryMasks[slot][i];
-                                if (trackingSeg != null) {
-                                    Array.Clear(trackingSeg, 0, trackingSeg.Length);
-                                    _trackingSegmentsPool[_trackingSegmentsPoolCount++] = trackingSeg;
-                                    trackingSeg = null;
-                                }
-                            }
-                        }
-                        else {
-                            ref var trackingSeg = ref TrackingMaskSegments[i];
-                            if (trackingSeg != null) {
-                                Array.Clear(trackingSeg, 0, trackingSeg.Length);
-                                #if FFS_ECS_BURST
-                                LifecycleHandle.OnTrackingSegmentPooled((uint)i);
-                                #endif
-                                _trackingSegmentsPool[_trackingSegmentsPoolCount++] = trackingSeg;
-                                trackingSeg = null;
-                            }
-                        }
+                        ReleaseTrackingSegmentInternal(i);
                     }
                 }
 
@@ -2208,6 +2165,66 @@ namespace FFS.Libraries.StaticEcs {
                     }
                     else {
                         Array.Clear(TrackingHeuristicChunks, 0, TrackingHeuristicChunks.Length);
+                    }
+                }
+            }
+
+            [MethodImpl(NoInlining)]
+            internal void HardResetChunkInternal(uint chunkIdx) {
+                var baseSegmentIdx = (int)(chunkIdx << Const.SEGMENTS_IN_CHUNK_SHIFT);
+                for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
+                    ReleaseSegmentInternal(baseSegmentIdx + s);
+                }
+                HeuristicChunks[chunkIdx] = default;
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private void ReleaseSegmentInternal(int segIdx) {
+                ref var masks = ref EntitiesMaskSegments[segIdx];
+                if (masks == null) return;
+                Array.Clear(masks, 0, SegmentMaskLen);
+
+                if (!IsTag) {
+                    ref var components = ref ComponentSegments[segIdx];
+                    if (HasDefaultValue) {
+                        components.AsSpan().Fill(DefaultValue);
+                    } else {
+                        Array.Clear(components, 0, Const.ENTITIES_IN_SEGMENT);
+                    }
+                    _componentsPool[_segmentsPoolCount] = components;
+                    components = null;
+                }
+                _segmentsPool[_segmentsPoolCount] = masks;
+                masks = null;
+                _segmentsPoolCount++;
+
+                #if FFS_ECS_BURST
+                LifecycleHandle.OnSegmentPooled((uint)segIdx);
+                #endif
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private void ReleaseTrackingSegmentInternal(int segIdx) {
+                var bufferSize = Data.Instance.TrackingBufferSize;
+                if (bufferSize > 0) {
+                    for (var slot = 0; slot < bufferSize + 1; slot++) {
+                        ref var trackingSeg = ref TrackingHistoryMasks[slot][segIdx];
+                        if (trackingSeg != null) {
+                            Array.Clear(trackingSeg, 0, trackingSeg.Length);
+                            _trackingSegmentsPool[_trackingSegmentsPoolCount++] = trackingSeg;
+                            trackingSeg = null;
+                        }
+                    }
+                }
+                else {
+                    ref var trackingSeg = ref TrackingMaskSegments[segIdx];
+                    if (trackingSeg != null) {
+                        Array.Clear(trackingSeg, 0, trackingSeg.Length);
+                        #if FFS_ECS_BURST
+                        LifecycleHandle.OnTrackingSegmentPooled((uint)segIdx);
+                        #endif
+                        _trackingSegmentsPool[_trackingSegmentsPoolCount++] = trackingSeg;
+                        trackingSeg = null;
                     }
                 }
             }
@@ -3320,7 +3337,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (HasWrite) {
                     Ref(entity).Write(ref writer, entity);
                 } else if (Unmanaged) {
-                    WriteUnmanagedRef(ref writer, ref Ref(entity));
+                    writer.ForceWriteUnmanaged(in Ref(entity));
                 }
                 #if FFS_ECS_DEBUG
                 else {
@@ -3360,7 +3377,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (HasRead) {
                     component.Read(ref reader, entity, oldVersion, disabled);
                 } else if (Unmanaged && oldVersion == Version) {
-                    ReadUnmanagedRef(ref reader, ref component);
+                    reader.ForceReadUnmanaged(out component);
                 }
                 #if FFS_ECS_DEBUG
                 else {
@@ -3375,21 +3392,6 @@ namespace FFS.Libraries.StaticEcs {
                 if (HasDisable && disabled) {
                     Disable(entity);
                 }
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            private void WriteUnmanagedRef(ref BinaryPackWriter writer, ref T value) {
-                var size = (uint)UnmanagedSize;
-                writer.EnsureSize(size);
-                Unsafe.WriteUnaligned(ref writer.Buffer[writer.Position], value);
-                writer.Position += size;
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            private void ReadUnmanagedRef(ref BinaryPackReader reader, ref T value) {
-                var size = (uint)UnmanagedSize;
-                value = Unsafe.ReadUnaligned<T>(ref reader.Buffer[reader.Position]);
-                reader.Position += size;
             }
             #endregion
 
@@ -3411,6 +3413,9 @@ namespace FFS.Libraries.StaticEcs {
 
             [MethodImpl(AggressiveInlining)]
             internal static void _HardReset() => Instance.HardResetInternal();
+
+            [MethodImpl(AggressiveInlining)]
+            internal static void _HardResetChunk(uint chunkIdx) => Instance.HardResetChunkInternal(chunkIdx);
 
             [MethodImpl(AggressiveInlining)]
             internal static void _TryToStringComponent(StringBuilder builder, uint eid) => Instance.TryToStringComponent(builder, new Entity(eid));

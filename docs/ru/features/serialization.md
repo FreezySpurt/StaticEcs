@@ -238,11 +238,11 @@ W.Serializer.CreateWorldSnapshot(writeEvents: false);
 // Без кастомных данных
 W.Serializer.CreateWorldSnapshot(withCustomSnapshotData: false);
 
-// Загрузка из файла
+// Загрузка из файла (gzip определяется автоматически)
 W.Serializer.LoadWorldSnapshot("path/to/world.bin");
 
-// Загрузка сжатых данных
-W.Serializer.LoadWorldSnapshot(compressed, gzip: true);
+// Загрузка сжатых данных (gzip определяется автоматически)
+W.Serializer.LoadWorldSnapshot(compressed);
 ```
 
 {: .importantru }
@@ -734,7 +734,7 @@ W.Serializer.CreateResourcesSnapshot("resources.bin", gzip: true);
 
 // Загрузить
 W.Serializer.LoadResourcesSnapshot(snapshot);
-W.Serializer.LoadResourcesSnapshot("resources.bin", gzip: true);
+W.Serializer.LoadResourcesSnapshot("resources.bin");
 ```
 
 При загрузке записи, `Guid` которых не зарегистрирован сейчас, молча пропускаются (как и для удалённых компонентов или событий) — добавление или удаление типа ресурса между save и load forward-совместимо.
@@ -809,7 +809,7 @@ W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
 
 // Загрузить
 W.Serializer.LoadSystemsSnapshot(snapshot);
-W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+W.Serializer.LoadSystemsSnapshot("systems.bin");
 ```
 
 Каждая секция группы содержит её scoped-ресурсы (singleton + named), затем все системы внутри неё, объявляющие `Guid`.
@@ -833,29 +833,37 @@ ___
 
 ## Сжатие (GZIP)
 
-Все методы создания и загрузки снимков поддерживают GZIP сжатие:
+Все методы создания снимков поддерживают GZIP сжатие через `gzip: true`. **Все** методы загрузки (`LoadWorldSnapshot`, `LoadClusterSnapshot`, `LoadChunkSnapshot`, `LoadEventsSnapshot`, `LoadResourcesSnapshot`, `LoadSystemsSnapshot`, `RestoreFromGIDStoreSnapshot`) **автоматически определяют** gzip по байтовой последовательности — передавайте байты или путь напрямую без флага.
 
 ```csharp
-// Мир
+// Мир — gzip определяется автоматически при загрузке
 byte[] snapshot = W.Serializer.CreateWorldSnapshot(gzip: true);
-W.Serializer.LoadWorldSnapshot(snapshot, gzip: true);
+W.Serializer.LoadWorldSnapshot(snapshot);
 
-// Кластер
+// Кластер — gzip определяется автоматически при загрузке
 byte[] cluster = W.Serializer.CreateClusterSnapshot(1, gzip: true);
-W.Serializer.LoadClusterSnapshot(cluster, gzip: true);
+W.Serializer.LoadClusterSnapshot(cluster);
 
-// Чанк
+// Чанк — gzip определяется автоматически при загрузке
 byte[] chunk = W.Serializer.CreateChunkSnapshot(0, gzip: true);
-W.Serializer.LoadChunkSnapshot(chunk, gzip: true);
+W.Serializer.LoadChunkSnapshot(chunk);
 
 // GID Store
 byte[] gid = W.Serializer.CreateGIDStoreSnapshot(gzip: true);
 
-// События
+// События — gzip определяется автоматически при загрузке
 byte[] events = W.Serializer.CreateEventsSnapshot(gzip: true);
-W.Serializer.LoadEventsSnapshot(events, gzip: true);
+W.Serializer.LoadEventsSnapshot(events);
 
-// Файлы
+// Ресурсы — gzip определяется автоматически при загрузке
+byte[] resources = W.Serializer.CreateResourcesSnapshot(gzip: true);
+W.Serializer.LoadResourcesSnapshot(resources);
+
+// Системы — gzip определяется автоматически при загрузке
+byte[] systems = W.Serializer.CreateSystemsSnapshot(gzip: true);
+W.Serializer.LoadSystemsSnapshot(systems);
+
+// Файлы — для мира/кластера/чанка/событий/ресурсов/систем gzip определяется автоматически при загрузке
 W.Serializer.CreateWorldSnapshot("world.bin", gzip: true);
-W.Serializer.LoadWorldSnapshot("world.bin", gzip: true);
+W.Serializer.LoadWorldSnapshot("world.bin");
 ```

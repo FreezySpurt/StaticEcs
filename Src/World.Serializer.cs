@@ -249,8 +249,20 @@ namespace FFS.Libraries.StaticEcs {
             /// <summary>
             /// Binary format version of snapshots (world, cluster, chunk) produced by this build.
             /// Bumped whenever the snapshot layout changes in an incompatible way.
+            /// <para>Constraint: little-endian byte sequence of this <c>ushort</c> must not collide with the
+            /// gzip RFC 1952 magic <c>0x1F 0x8B</c> (i.e. value <c>0x8B1F</c> = 35615) — otherwise the
+            /// autodetection in <see cref="BinaryPackReader.RentAndFillFromBytes"/> /
+            /// <see cref="BinaryPackReader.RentAndFillFromFile"/> would mistake a raw snapshot for a
+            /// gzip-compressed one. There is plenty of headroom; this is a future-proofing note.</para>
             /// </summary>
             internal const ushort SnapshotFormatVersion = 2;
+
+            /// <summary>
+            /// Size in bytes of the snapshot header: <c>ushort</c> version (2 bytes) +
+            /// <c>ulong</c> payload size (8 bytes). Used both during writing and to size the peek
+            /// buffer when loading.
+            /// </summary>
+            internal const int SnapshotHeaderSize = sizeof(ushort) + sizeof(ulong);
 
             internal static Dictionary<Guid, (CustomSnapshotDataWriter writer, CustomSnapshotDataReader reader, ushort version)> SnapshotDataSerializers;
             internal static Dictionary<Guid, (CustomSnapshotEntityDataWriter<TWorld> writer, CustomSnapshotEntityDataReader<TWorld> reader, ushort version)> SnapshotDataEntitySerializers;
@@ -522,6 +534,10 @@ namespace FFS.Libraries.StaticEcs {
             /// Serializes the current event ring-buffer state into an existing binary writer.
             /// Only event types registered with a non-empty GUID are included.
             /// Requires the world to be initialized.
+            /// <para>The output starts with the standard 10-byte snapshot header
+            /// (<see cref="SnapshotFormatVersion"/> + payload size), matching the format consumed by
+            /// <see cref="LoadEventsSnapshot(BinaryPackReader)"/> and the byte/file overloads.
+            /// Embedded serialization inside a world snapshot uses an internal header-less path and is unaffected.</para>
             /// </summary>
             /// <param name="writer">The binary writer to serialize events into.</param>
             [MethodImpl(AggressiveInlining)]
@@ -529,7 +545,7 @@ namespace FFS.Libraries.StaticEcs {
                 #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Event, Method: CreateSnapshot, World not initialized");
                 #endif
-                Data.Instance.WriteEvents(ref writer);
+                WriteEventsWithHeader(ref writer);
             }
             
             /// <summary>
@@ -544,12 +560,12 @@ namespace FFS.Libraries.StaticEcs {
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Event, Method: CreateSnapshot, World not initialized");
                 #endif
                 var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                Data.Instance.WriteEvents(ref writer);
+                WriteEventsWithHeader(ref writer);
                 var result = writer.CopyToBytes(gzip);
                 writer.Dispose();
                 return result;
             }
-            
+
             /// <summary>
             /// Serializes the current event ring-buffer state into an existing byte array, resizing it if necessary.
             /// </summary>
@@ -561,11 +577,11 @@ namespace FFS.Libraries.StaticEcs {
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Event, Method: CreateSnapshot, World not initialized");
                 #endif
                 var writer = BinaryPackWriter.CreateFromPool((uint) result.Length);
-                Data.Instance.WriteEvents(ref writer);
+                WriteEventsWithHeader(ref writer);
                 writer.CopyToBytes(ref result, gzip);
                 writer.Dispose();
             }
-            
+
             /// <summary>
             /// Serializes the current event ring-buffer state and writes it directly to a file.
             /// </summary>
@@ -579,15 +595,17 @@ namespace FFS.Libraries.StaticEcs {
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Event, Method: CreateSnapshot, World not initialized");
                 #endif
                 var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                Data.Instance.WriteEvents(ref writer);
+                WriteEventsWithHeader(ref writer);
                 writer.FlushToFile(filePath, gzip, flushToDisk);
                 writer.Dispose();
             }
-            
+
             /// <summary>
             /// Restores the event ring-buffer state from a binary reader.
             /// All existing events are cleared before loading. Event types not registered in the current world
             /// are handled by delete migrators if registered, otherwise silently skipped.
+            /// <para>Expects the reader to be positioned at the standard 10-byte snapshot header produced by
+            /// <see cref="CreateEventsSnapshot(ref BinaryPackWriter)"/> and the byte/file overloads.</para>
             /// </summary>
             /// <param name="reader">The binary reader containing serialized event data.</param>
             [MethodImpl(AggressiveInlining)]
@@ -595,43 +613,60 @@ namespace FFS.Libraries.StaticEcs {
                 #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Event, Method: LoadSnapshot, World not initialized");
                 #endif
-                Data.Instance.ReadEvents(ref reader);
+                ReadEventsWithHeader(ref reader);
             }
 
             /// <inheritdoc cref="LoadEventsSnapshot(BinaryPackReader)"/>
-            /// <param name="snapshot">Byte array containing the serialized event data.</param>
-            /// <param name="gzip">When <c>true</c>, the input is decompressed from gzip before reading.</param>
+            /// <param name="snapshot">Byte array containing the serialized event data. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadEventsSnapshot(byte[] snapshot, bool gzip = false) {
+            public static void LoadEventsSnapshot(byte[] snapshot) {
                 #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Event, Method: LoadSnapshot, World not initialized");
                 #endif
-                if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
-                    writer.WriteGzipData(snapshot);
-                    var reader = writer.AsReader();
-                    Data.Instance.ReadEvents(ref reader);
-                    writer.Dispose();
-                } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
-                    Data.Instance.ReadEvents(ref reader);
+                var reader = BinaryPackReader.RentAndFillFromBytes(snapshot, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadEventsWithHeader(ref reader);
+                reader.Dispose();
+            }
+
+            /// <inheritdoc cref="LoadEventsSnapshot(BinaryPackReader)"/>
+            /// <param name="worldSnapshotFilePath">Path to the file containing serialized event data. Gzip compression is autodetected.</param>
+            [MethodImpl(AggressiveInlining)]
+            public static void LoadEventsSnapshot(string worldSnapshotFilePath) {
+                #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
+                if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Event, Method: LoadSnapshot, World not initialized");
+                #endif
+                var reader = BinaryPackReader.RentAndFillFromFile(worldSnapshotFilePath, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadEventsWithHeader(ref reader);
+                reader.Dispose();
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private static void WriteEventsWithHeader(ref BinaryPackWriter writer) {
+                writer.WriteUshort(SnapshotFormatVersion);
+                var sizePos = writer.MakePoint(sizeof(ulong));
+                Data.Instance.WriteEvents(ref writer);
+                writer.WriteUlongAt(sizePos, writer.Position - (sizePos + sizeof(ulong)));
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private static void ReadEventsWithHeader(ref BinaryPackReader reader) {
+                var version = reader.ReadUshort();
+                if (version != SnapshotFormatVersion) {
+                    throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadEvents", $"Unsupported snapshot format version: saved={version}, expected={SnapshotFormatVersion}");
                 }
-            }
-
-            /// <inheritdoc cref="LoadEventsSnapshot(BinaryPackReader)"/>
-            /// <param name="worldSnapshotFilePath">Path to the file containing serialized event data.</param>
-            /// <param name="gzip">When <c>true</c>, the file is decompressed from gzip before reading.</param>
-            /// <param name="byteSizeHint">Initial buffer size hint for file loading.</param>
-            [MethodImpl(AggressiveInlining)]
-            public static void LoadEventsSnapshot(string worldSnapshotFilePath, bool gzip = false, uint byteSizeHint = 512) {
-                #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
-                if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Event, Method: LoadSnapshot, World not initialized");
+                #if FFS_ECS_DEBUG
+                var savedSize = reader.ReadUlong();
+                var sizeStartPos = reader.Position;
+                #else
+                _ = reader.ReadUlong();
                 #endif
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                writer.WriteFromFile(worldSnapshotFilePath, gzip);
-                var reader = writer.AsReader();
                 Data.Instance.ReadEvents(ref reader);
-                writer.Dispose();
+                #if FFS_ECS_DEBUG
+                var actualSize = (ulong)(reader.Position - sizeStartPos);
+                if (actualSize != savedSize) {
+                    throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadEvents", $"Snapshot size mismatch: saved={savedSize}, actual={actualSize}. Stream is corrupted or format diverged.");
+                }
+                #endif
             }
             #endregion
 
@@ -640,13 +675,17 @@ namespace FFS.Libraries.StaticEcs {
             /// Serializes the current state of all serializable resources (singleton and named) into an existing binary writer.
             /// Only resources whose type returns a non-empty <see cref="System.Guid"/> from <see cref="IResource.Guid"/> are included.
             /// Requires the world to be initialized.
+            /// <para>The output starts with the standard 10-byte snapshot header
+            /// (<see cref="SnapshotFormatVersion"/> + payload size), matching the format consumed by
+            /// <see cref="LoadResourcesSnapshot(BinaryPackReader)"/> and the byte/file overloads.
+            /// Embedded serialization inside a world snapshot uses an internal header-less path and is unaffected.</para>
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public static void CreateResourcesSnapshot(ref BinaryPackWriter writer) {
                 #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Resources, Method: CreateSnapshot, World not initialized");
                 #endif
-                WriteResources(ref writer);
+                WriteResourcesWithHeader(ref writer);
             }
 
             /// <summary>
@@ -658,7 +697,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Resources, Method: CreateSnapshot, World not initialized");
                 #endif
                 var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                WriteResources(ref writer);
+                WriteResourcesWithHeader(ref writer);
                 var result = writer.CopyToBytes(gzip);
                 writer.Dispose();
                 return result;
@@ -673,7 +712,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Resources, Method: CreateSnapshot, World not initialized");
                 #endif
                 var writer = BinaryPackWriter.CreateFromPool((uint) result.Length);
-                WriteResources(ref writer);
+                WriteResourcesWithHeader(ref writer);
                 writer.CopyToBytes(ref result, gzip);
                 writer.Dispose();
             }
@@ -687,7 +726,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Resources, Method: CreateSnapshot, World not initialized");
                 #endif
                 var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                WriteResources(ref writer);
+                WriteResourcesWithHeader(ref writer);
                 writer.FlushToFile(filePath, gzip, flushToDisk);
                 writer.Dispose();
             }
@@ -695,44 +734,68 @@ namespace FFS.Libraries.StaticEcs {
             /// <summary>
             /// Restores the state of all serializable resources from a binary reader.
             /// Resources whose <see cref="System.Guid"/> is not currently registered are silently skipped.
+            /// <para>Expects the reader to be positioned at the standard 10-byte snapshot header produced by
+            /// <see cref="CreateResourcesSnapshot(ref BinaryPackWriter)"/> and the byte/file overloads.</para>
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public static void LoadResourcesSnapshot(BinaryPackReader reader) {
                 #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Resources, Method: LoadSnapshot, World not initialized");
                 #endif
-                ReadResources(ref reader);
+                ReadResourcesWithHeader(ref reader);
             }
 
             /// <inheritdoc cref="LoadResourcesSnapshot(BinaryPackReader)"/>
+            /// <param name="snapshot">Byte array containing the serialized resources data. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadResourcesSnapshot(byte[] snapshot, bool gzip = false) {
+            public static void LoadResourcesSnapshot(byte[] snapshot) {
                 #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Resources, Method: LoadSnapshot, World not initialized");
                 #endif
-                if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
-                    writer.WriteGzipData(snapshot);
-                    var reader = writer.AsReader();
-                    ReadResources(ref reader);
-                    writer.Dispose();
-                } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
-                    ReadResources(ref reader);
+                var reader = BinaryPackReader.RentAndFillFromBytes(snapshot, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadResourcesWithHeader(ref reader);
+                reader.Dispose();
+            }
+
+            /// <inheritdoc cref="LoadResourcesSnapshot(BinaryPackReader)"/>
+            /// <param name="filePath">Path to the file containing serialized resources data. Gzip compression is autodetected.</param>
+            [MethodImpl(AggressiveInlining)]
+            public static void LoadResourcesSnapshot(string filePath) {
+                #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
+                if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Resources, Method: LoadSnapshot, World not initialized");
+                #endif
+                var reader = BinaryPackReader.RentAndFillFromFile(filePath, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadResourcesWithHeader(ref reader);
+                reader.Dispose();
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private static void WriteResourcesWithHeader(ref BinaryPackWriter writer) {
+                writer.WriteUshort(SnapshotFormatVersion);
+                var sizePos = writer.MakePoint(sizeof(ulong));
+                WriteResources(ref writer);
+                writer.WriteUlongAt(sizePos, writer.Position - (sizePos + sizeof(ulong)));
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private static void ReadResourcesWithHeader(ref BinaryPackReader reader) {
+                var version = reader.ReadUshort();
+                if (version != SnapshotFormatVersion) {
+                    throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadResources", $"Unsupported snapshot format version: saved={version}, expected={SnapshotFormatVersion}");
                 }
-            }
-
-            /// <inheritdoc cref="LoadResourcesSnapshot(BinaryPackReader)"/>
-            [MethodImpl(AggressiveInlining)]
-            public static void LoadResourcesSnapshot(string filePath, bool gzip = false, uint byteSizeHint = 512) {
-                #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
-                if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Resources, Method: LoadSnapshot, World not initialized");
+                #if FFS_ECS_DEBUG
+                var savedSize = reader.ReadUlong();
+                var sizeStartPos = reader.Position;
+                #else
+                _ = reader.ReadUlong();
                 #endif
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                writer.WriteFromFile(filePath, gzip);
-                var reader = writer.AsReader();
                 ReadResources(ref reader);
-                writer.Dispose();
+                #if FFS_ECS_DEBUG
+                var actualSize = (ulong)(reader.Position - sizeStartPos);
+                if (actualSize != savedSize) {
+                    throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadResources", $"Snapshot size mismatch: saved={savedSize}, actual={actualSize}. Stream is corrupted or format diverged.");
+                }
+                #endif
             }
             #endregion
 
@@ -741,13 +804,17 @@ namespace FFS.Libraries.StaticEcs {
             /// Serializes the state of all registered <see cref="World{TWorld}.Systems{T}"/> groups (and their scoped resources)
             /// into an existing binary writer. Only systems whose <see cref="ISystem.Guid"/> returns a non-empty value are included.
             /// Requires the world to be initialized.
+            /// <para>The output starts with the standard 10-byte snapshot header
+            /// (<see cref="SnapshotFormatVersion"/> + payload size), matching the format consumed by
+            /// <see cref="LoadSystemsSnapshot(BinaryPackReader)"/> and the byte/file overloads.
+            /// Embedded serialization inside a world snapshot uses an internal header-less path and is unaffected.</para>
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public static void CreateSystemsSnapshot(ref BinaryPackWriter writer) {
                 #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Systems, Method: CreateSnapshot, World not initialized");
                 #endif
-                WriteSystems(ref writer);
+                WriteSystemsWithHeader(ref writer);
             }
 
             /// <summary>
@@ -759,7 +826,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Systems, Method: CreateSnapshot, World not initialized");
                 #endif
                 var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                WriteSystems(ref writer);
+                WriteSystemsWithHeader(ref writer);
                 var result = writer.CopyToBytes(gzip);
                 writer.Dispose();
                 return result;
@@ -774,7 +841,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Systems, Method: CreateSnapshot, World not initialized");
                 #endif
                 var writer = BinaryPackWriter.CreateFromPool((uint) result.Length);
-                WriteSystems(ref writer);
+                WriteSystemsWithHeader(ref writer);
                 writer.CopyToBytes(ref result, gzip);
                 writer.Dispose();
             }
@@ -788,7 +855,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Systems, Method: CreateSnapshot, World not initialized");
                 #endif
                 var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                WriteSystems(ref writer);
+                WriteSystemsWithHeader(ref writer);
                 writer.FlushToFile(filePath, gzip, flushToDisk);
                 writer.Dispose();
             }
@@ -796,44 +863,68 @@ namespace FFS.Libraries.StaticEcs {
             /// <summary>
             /// Restores the state of all registered systems groups from a binary reader.
             /// Groups or systems whose <see cref="System.Guid"/> is not currently registered are silently skipped.
+            /// <para>Expects the reader to be positioned at the standard 10-byte snapshot header produced by
+            /// <see cref="CreateSystemsSnapshot(ref BinaryPackWriter)"/> and the byte/file overloads.</para>
             /// </summary>
             [MethodImpl(AggressiveInlining)]
             public static void LoadSystemsSnapshot(BinaryPackReader reader) {
                 #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Systems, Method: LoadSnapshot, World not initialized");
                 #endif
-                ReadSystems(ref reader);
+                ReadSystemsWithHeader(ref reader);
             }
 
             /// <inheritdoc cref="LoadSystemsSnapshot(BinaryPackReader)"/>
+            /// <param name="snapshot">Byte array containing the serialized systems data. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadSystemsSnapshot(byte[] snapshot, bool gzip = false) {
+            public static void LoadSystemsSnapshot(byte[] snapshot) {
                 #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
                 if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Systems, Method: LoadSnapshot, World not initialized");
                 #endif
-                if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
-                    writer.WriteGzipData(snapshot);
-                    var reader = writer.AsReader();
-                    ReadSystems(ref reader);
-                    writer.Dispose();
-                } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
-                    ReadSystems(ref reader);
+                var reader = BinaryPackReader.RentAndFillFromBytes(snapshot, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadSystemsWithHeader(ref reader);
+                reader.Dispose();
+            }
+
+            /// <inheritdoc cref="LoadSystemsSnapshot(BinaryPackReader)"/>
+            /// <param name="filePath">Path to the file containing serialized systems data. Gzip compression is autodetected.</param>
+            [MethodImpl(AggressiveInlining)]
+            public static void LoadSystemsSnapshot(string filePath) {
+                #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
+                if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Systems, Method: LoadSnapshot, World not initialized");
+                #endif
+                var reader = BinaryPackReader.RentAndFillFromFile(filePath, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadSystemsWithHeader(ref reader);
+                reader.Dispose();
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private static void WriteSystemsWithHeader(ref BinaryPackWriter writer) {
+                writer.WriteUshort(SnapshotFormatVersion);
+                var sizePos = writer.MakePoint(sizeof(ulong));
+                WriteSystems(ref writer);
+                writer.WriteUlongAt(sizePos, writer.Position - (sizePos + sizeof(ulong)));
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private static void ReadSystemsWithHeader(ref BinaryPackReader reader) {
+                var version = reader.ReadUshort();
+                if (version != SnapshotFormatVersion) {
+                    throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadSystems", $"Unsupported snapshot format version: saved={version}, expected={SnapshotFormatVersion}");
                 }
-            }
-
-            /// <inheritdoc cref="LoadSystemsSnapshot(BinaryPackReader)"/>
-            [MethodImpl(AggressiveInlining)]
-            public static void LoadSystemsSnapshot(string filePath, bool gzip = false, uint byteSizeHint = 512) {
-                #if ((DEBUG || FFS_ECS_ENABLE_DEBUG) && !FFS_ECS_DISABLE_DEBUG)
-                if (!IsWorldInitialized) throw new StaticEcsException($"World<{typeof(TWorld)}>.Systems, Method: LoadSnapshot, World not initialized");
+                #if FFS_ECS_DEBUG
+                var savedSize = reader.ReadUlong();
+                var sizeStartPos = reader.Position;
+                #else
+                _ = reader.ReadUlong();
                 #endif
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                writer.WriteFromFile(filePath, gzip);
-                var reader = writer.AsReader();
                 ReadSystems(ref reader);
-                writer.Dispose();
+                #if FFS_ECS_DEBUG
+                var actualSize = (ulong)(reader.Position - sizeStartPos);
+                if (actualSize != savedSize) {
+                    throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadSystems", $"Snapshot size mismatch: saved={savedSize}, actual={actualSize}. Stream is corrupted or format diverged.");
+                }
+                #endif
             }
             #endregion
 
@@ -954,40 +1045,27 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             /// <inheritdoc cref="LoadWorldSnapshot(BinaryPackReader, bool)"/>
-            /// <param name="snapshot">Byte array containing the serialized world snapshot.</param>
-            /// <param name="gzip">When <c>true</c>, the input is decompressed from gzip before reading.</param>
+            /// <param name="snapshot">Byte array containing the serialized world snapshot. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadWorldSnapshot(byte[] snapshot, bool gzip = false, bool hardReset = false) {
+            public static void LoadWorldSnapshot(byte[] snapshot, bool hardReset = false) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
-                if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
-                    writer.WriteGzipData(snapshot);
-                    var reader = writer.AsReader();
-                    ReadWorld(ref reader, hardReset);
-                    writer.Dispose();
-                } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
-                    ReadWorld(ref reader, hardReset);
-                }
+                var reader = BinaryPackReader.RentAndFillFromBytes(snapshot, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadWorld(ref reader, hardReset);
+                reader.Dispose();
             }
 
             /// <inheritdoc cref="LoadWorldSnapshot(BinaryPackReader, bool)"/>
-            /// <param name="worldSnapshotFilePath">Path to the file containing the world snapshot.</param>
-            /// <param name="gzip">When <c>true</c>, the file is decompressed from gzip before reading.</param>
-            /// <param name="byteSizeHint">Initial buffer size hint. When 0, automatically calculated from world capacity.</param>
+            /// <param name="worldSnapshotFilePath">Path to the file containing the world snapshot. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadWorldSnapshot(string worldSnapshotFilePath, bool gzip = false, uint byteSizeHint = 0, bool hardReset = false) {
+            public static void LoadWorldSnapshot(string worldSnapshotFilePath, bool hardReset = false) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
-                CalculateByteSizeHint(ref byteSizeHint);
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                writer.WriteFromFile(worldSnapshotFilePath, gzip);
-                var reader = writer.AsReader();
+                var reader = BinaryPackReader.RentAndFillFromFile(worldSnapshotFilePath, SnapshotHeaderSize, SnapshotTotalSizeParser);
                 ReadWorld(ref reader, hardReset);
-                writer.Dispose();
+                reader.Dispose();
             }
 
             /// <summary>
@@ -1093,40 +1171,27 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             /// <inheritdoc cref="LoadClusterSnapshot(BinaryPackReader, EntitiesAsNewParams)"/>
-            /// <param name="snapshot">Byte array containing the serialized cluster data.</param>
-            /// <param name="gzip">When <c>true</c>, the input is decompressed from gzip before reading.</param>
+            /// <param name="snapshot">Byte array containing the serialized cluster data. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadClusterSnapshot(byte[] snapshot, bool gzip = false, EntitiesAsNewParams entitiesAsNew = default) {
+            public static void LoadClusterSnapshot(byte[] snapshot, EntitiesAsNewParams entitiesAsNew = default) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
-                if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
-                    writer.WriteGzipData(snapshot);
-                    var reader = writer.AsReader();
-                    ReadCluster(ref reader, entitiesAsNew);
-                    writer.Dispose();
-                } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
-                    ReadCluster(ref reader, entitiesAsNew);
-                }
+                var reader = BinaryPackReader.RentAndFillFromBytes(snapshot, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadCluster(ref reader, entitiesAsNew);
+                reader.Dispose();
             }
 
             /// <inheritdoc cref="LoadClusterSnapshot(BinaryPackReader, EntitiesAsNewParams)"/>
-            /// <param name="worldSnapshotFilePath">Path to the file containing cluster snapshot data.</param>
-            /// <param name="gzip">When <c>true</c>, the file is decompressed from gzip before reading.</param>
-            /// <param name="byteSizeHint">Initial buffer size hint. When 0, automatically calculated.</param>
+            /// <param name="worldSnapshotFilePath">Path to the file containing cluster snapshot data. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadClusterSnapshot(string worldSnapshotFilePath, bool gzip = false, uint byteSizeHint = 0, EntitiesAsNewParams entitiesAsNew = default) {
+            public static void LoadClusterSnapshot(string worldSnapshotFilePath, EntitiesAsNewParams entitiesAsNew = default) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
-                CalculateByteSizeHint(ref byteSizeHint);
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                writer.WriteFromFile(worldSnapshotFilePath, gzip);
-                var reader = writer.AsReader();
+                var reader = BinaryPackReader.RentAndFillFromFile(worldSnapshotFilePath, SnapshotHeaderSize, SnapshotTotalSizeParser);
                 ReadCluster(ref reader, entitiesAsNew);
-                writer.Dispose();
+                reader.Dispose();
             }
 
             /// <summary>
@@ -1213,40 +1278,27 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             /// <inheritdoc cref="LoadChunkSnapshot(BinaryPackReader, EntitiesAsNewParams)"/>
-            /// <param name="snapshot">Byte array containing the serialized chunk data.</param>
-            /// <param name="gzip">When <c>true</c>, the input is decompressed from gzip before reading.</param>
+            /// <param name="snapshot">Byte array containing the serialized chunk data. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadChunkSnapshot(byte[] snapshot, bool gzip = false, EntitiesAsNewParams entitiesAsNew = default) {
+            public static void LoadChunkSnapshot(byte[] snapshot, EntitiesAsNewParams entitiesAsNew = default) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
-                if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
-                    writer.WriteGzipData(snapshot);
-                    var reader = writer.AsReader();
-                    ReadChunk(ref reader, entitiesAsNew);
-                    writer.Dispose();
-                } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
-                    ReadChunk(ref reader, entitiesAsNew);
-                }
+                var reader = BinaryPackReader.RentAndFillFromBytes(snapshot, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadChunk(ref reader, entitiesAsNew);
+                reader.Dispose();
             }
 
             /// <inheritdoc cref="LoadChunkSnapshot(BinaryPackReader, EntitiesAsNewParams)"/>
-            /// <param name="worldSnapshotFilePath">Path to the file containing chunk snapshot data.</param>
-            /// <param name="gzip">When <c>true</c>, the file is decompressed from gzip before reading.</param>
-            /// <param name="byteSizeHint">Initial buffer size hint. When 0, automatically calculated.</param>
+            /// <param name="worldSnapshotFilePath">Path to the file containing chunk snapshot data. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void LoadChunkSnapshot(string worldSnapshotFilePath, bool gzip = false, uint byteSizeHint = 0, EntitiesAsNewParams entitiesAsNew = default) {
+            public static void LoadChunkSnapshot(string worldSnapshotFilePath, EntitiesAsNewParams entitiesAsNew = default) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
-                CalculateByteSizeHint(ref byteSizeHint);
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                writer.WriteFromFile(worldSnapshotFilePath, gzip);
-                var reader = writer.AsReader();
+                var reader = BinaryPackReader.RentAndFillFromFile(worldSnapshotFilePath, SnapshotHeaderSize, SnapshotTotalSizeParser);
                 ReadChunk(ref reader, entitiesAsNew);
-                writer.Dispose();
+                reader.Dispose();
             }
             
             [MethodImpl(AggressiveInlining)]
@@ -1259,6 +1311,20 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             private static uint CalculateByteSizeHint() {
                 return (uint) (Data.Instance.HeuristicChunks.Length * 10240 * 4);
+            }
+
+            private static readonly TotalSizeParser SnapshotTotalSizeParser = ParseSnapshotTotalSize;
+
+            private static uint ParseSnapshotTotalSize(ReadOnlySpan<byte> header) {
+                var payloadSize = header[2]
+                                  | ((ulong)header[3] << 8)
+                                  | ((ulong)header[4] << 16)
+                                  | ((ulong)header[5] << 24)
+                                  | ((ulong)header[6] << 32)
+                                  | ((ulong)header[7] << 40)
+                                  | ((ulong)header[8] << 48)
+                                  | ((ulong)header[9] << 56);
+                return checked((uint)(SnapshotHeaderSize + payloadSize));
             }
 
             [MethodImpl(AggressiveInlining)]
@@ -1399,6 +1465,8 @@ namespace FFS.Libraries.StaticEcs {
                         chunkIdx = FindNextSelfFreeChunk().ChunkIdx;
                         tempChunks[i] = chunkIdx;
                         RegisterChunk(chunkIdx, ChunkOwnerType.Self, entitiesAsNewParams.ClusterId);
+                    } else if (HasEntitiesInChunk(chunkIdx)) {
+                        throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadCluster", $"Chunk {chunkIdx} has active entities; cannot load snapshot with entitiesAsNew=false. Destroy/unload entities first.");
                     }
                     if (withEntitiesData) {
                         Data.Instance.ReadChunk(ref reader, chunkIdx, false);
@@ -1498,8 +1566,6 @@ namespace FFS.Libraries.StaticEcs {
                 if (actualSize != savedSize) {
                     throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadChunk", $"Snapshot size mismatch: saved={savedSize}, actual={actualSize}. Stream is corrupted or format diverged.");
                 }
-                #else
-                _ = savedSize;
                 #endif
             }
 
@@ -1633,13 +1699,13 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 var tempChunks = TempChunksData.Create();
                 var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
-                Data.Instance.Write(ref writer, strategy, clusters, ref tempChunks, false);
+                WriteGIDStoreWithHeader(ref writer, strategy, clusters, ref tempChunks);
                 var result = writer.CopyToBytes(gzip);
                 writer.Dispose();
                 tempChunks.Dispose();
                 return result;
             }
-            
+
             /// <inheritdoc cref="CreateGIDStoreSnapshot(bool, ChunkWritingStrategy, ReadOnlySpan{ushort})"/>
             /// <param name="result">Reference to the destination byte array. Resized if necessary.</param>
             [MethodImpl(AggressiveInlining)]
@@ -1649,12 +1715,12 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 var tempChunks = TempChunksData.Create();
                 var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
-                Data.Instance.Write(ref writer, strategy, clusters, ref tempChunks, false);
+                WriteGIDStoreWithHeader(ref writer, strategy, clusters, ref tempChunks);
                 writer.CopyToBytes(ref result, gzip);
                 writer.Dispose();
                 tempChunks.Dispose();
             }
-            
+
             /// <inheritdoc cref="CreateGIDStoreSnapshot(bool, ChunkWritingStrategy, ReadOnlySpan{ushort})"/>
             /// <param name="filePath">Destination file path.</param>
             /// <param name="flushToDisk">When <c>true</c>, forces the OS to flush file buffers to physical storage.</param>
@@ -1665,10 +1731,39 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 var tempChunks = TempChunksData.Create();
                 var writer = BinaryPackWriter.CreateFromPool(CalculateByteSizeHint());
-                Data.Instance.Write(ref writer, strategy, clusters, ref tempChunks, false);
+                WriteGIDStoreWithHeader(ref writer, strategy, clusters, ref tempChunks);
                 writer.FlushToFile(filePath, gzip, flushToDisk);
                 writer.Dispose();
                 tempChunks.Dispose();
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private static void WriteGIDStoreWithHeader(ref BinaryPackWriter writer, ChunkWritingStrategy strategy, ReadOnlySpan<ushort> clusters, ref TempChunksData tempChunks) {
+                writer.WriteUshort(SnapshotFormatVersion);
+                var sizePos = writer.MakePoint(sizeof(ulong));
+                Data.Instance.Write(ref writer, strategy, clusters, ref tempChunks, false);
+                writer.WriteUlongAt(sizePos, writer.Position - (sizePos + sizeof(ulong)));
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            private static void ReadGIDStoreWithHeader(ref BinaryPackReader reader, bool hardReset) {
+                var version = reader.ReadUshort();
+                if (version != SnapshotFormatVersion) {
+                    throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadGIDStore", $"Unsupported snapshot format version: saved={version}, expected={SnapshotFormatVersion}");
+                }
+                #if FFS_ECS_DEBUG
+                var savedSize = reader.ReadUlong();
+                var sizeStartPos = reader.Position;
+                #else
+                _ = reader.ReadUlong();
+                #endif
+                Data.Instance.Read(ref reader, false, hardReset);
+                #if FFS_ECS_DEBUG
+                var actualSize = (ulong)(reader.Position - sizeStartPos);
+                if (actualSize != savedSize) {
+                    throw new StaticEcsException($"World<{typeof(TWorld)}>", "ReadGIDStore", $"Snapshot size mismatch: saved={savedSize}, actual={actualSize}. Stream is corrupted or format diverged.");
+                }
+                #endif
             }
             
             /// <summary>
@@ -1676,6 +1771,8 @@ namespace FFS.Libraries.StaticEcs {
             /// No component or tag data is loaded — only entity slots are allocated.
             /// <para>The world must already be initialized (see <c>Initialize</c>); existing state is cleared first.
             /// After this call, use cluster/chunk snapshots or entity snapshots to populate component/tag data.</para>
+            /// <para>Expects the reader to be positioned at the standard 10-byte snapshot header produced by the
+            /// <c>CreateGIDStoreSnapshot</c> byte/file overloads.</para>
             /// </summary>
             /// <param name="reader">The binary reader containing GID store snapshot data.</param>
             /// <param name="hardReset">When <c>true</c>, performs a hard reset (no OnDelete hooks, faster) instead of standard
@@ -1686,44 +1783,31 @@ namespace FFS.Libraries.StaticEcs {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
-                Data.Instance.Read(ref reader, false, hardReset);
+                ReadGIDStoreWithHeader(ref reader, hardReset);
             }
 
             /// <inheritdoc cref="RestoreFromGIDStoreSnapshot(BinaryPackReader, bool)"/>
-            /// <param name="snapshot">Byte array containing the GID store snapshot.</param>
-            /// <param name="gzip">When <c>true</c>, the input is decompressed from gzip before reading.</param>
+            /// <param name="snapshot">Byte array containing the GID store snapshot. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void RestoreFromGIDStoreSnapshot(byte[] snapshot, bool gzip = false, bool hardReset = false) {
+            public static void RestoreFromGIDStoreSnapshot(byte[] snapshot, bool hardReset = false) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
-                if (gzip) {
-                    var writer = BinaryPackWriter.CreateFromPool((uint) (snapshot.Length * 2));
-                    writer.WriteGzipData(snapshot);
-                    var reader = writer.AsReader();
-                    Data.Instance.Read(ref reader, false, hardReset);
-                    writer.Dispose();
-                } else {
-                    var reader = new BinaryPackReader(snapshot, (uint) snapshot.Length, 0);
-                    Data.Instance.Read(ref reader, false, hardReset);
-                }
+                var reader = BinaryPackReader.RentAndFillFromBytes(snapshot, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadGIDStoreWithHeader(ref reader, hardReset);
+                reader.Dispose();
             }
 
             /// <inheritdoc cref="RestoreFromGIDStoreSnapshot(BinaryPackReader, bool)"/>
-            /// <param name="worldSnapshotFilePath">Path to the file containing GID store snapshot data.</param>
-            /// <param name="gzip">When <c>true</c>, the file is decompressed from gzip before reading.</param>
-            /// <param name="byteSizeHint">Initial buffer size hint. When 0, automatically calculated.</param>
+            /// <param name="worldSnapshotFilePath">Path to the file containing GID store snapshot data. Gzip compression is autodetected.</param>
             [MethodImpl(AggressiveInlining)]
-            public static void RestoreFromGIDStoreSnapshot(string worldSnapshotFilePath, bool gzip = false, uint byteSizeHint = 0, bool hardReset = false) {
+            public static void RestoreFromGIDStoreSnapshot(string worldSnapshotFilePath, bool hardReset = false) {
                 #if FFS_ECS_DEBUG
                 AssertWorldIsInitialized(WorldTypeName);
                 #endif
-                CalculateByteSizeHint(ref byteSizeHint);
-                var writer = BinaryPackWriter.CreateFromPool(byteSizeHint);
-                writer.WriteFromFile(worldSnapshotFilePath, gzip);
-                var reader = writer.AsReader();
-                Data.Instance.Read(ref reader, false, hardReset);
-                writer.Dispose();
+                var reader = BinaryPackReader.RentAndFillFromFile(worldSnapshotFilePath, SnapshotHeaderSize, SnapshotTotalSizeParser);
+                ReadGIDStoreWithHeader(ref reader, hardReset);
+                reader.Dispose();
             }
 
             /// <summary>

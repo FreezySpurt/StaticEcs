@@ -539,6 +539,7 @@ namespace FFS.Libraries.StaticEcs {
         private readonly unsafe delegate*<uint, ulong[][], void> _resize;
         private readonly unsafe delegate*<void> _destroy;
         private readonly unsafe delegate*<void> _hardReset;
+        private readonly unsafe delegate*<uint, void> _hardResetChunk;
         private readonly unsafe delegate*<StringBuilder, uint, void> _tryToStringComponent;
         // serialization
         private readonly unsafe delegate*<ref BinaryPackWriter, uint, bool, void> _writeChunk;
@@ -630,6 +631,7 @@ namespace FFS.Libraries.StaticEcs {
                 &World<TWorld>.Components<TComponent>._Resize,
                 &World<TWorld>.Components<TComponent>._Destroy,
                 &World<TWorld>.Components<TComponent>._HardReset,
+                &World<TWorld>.Components<TComponent>._HardResetChunk,
                 &World<TWorld>.Components<TComponent>._TryToStringComponent,
                 &World<TWorld>.Components<TComponent>._WriteChunk,
                 &World<TWorld>.Components<TComponent>._ReadChunk,
@@ -678,6 +680,7 @@ namespace FFS.Libraries.StaticEcs {
             delegate*<uint, ulong[][], void> resize,
             delegate*<void> destroy,
             delegate*<void> hardReset,
+            delegate*<uint, void> hardResetChunk,
             delegate*<StringBuilder, uint, void> tryToStringComponent,
             delegate*<ref BinaryPackWriter, uint, bool, void> writeChunk,
             delegate*<ref BinaryPackReader, uint, void> readChunk,
@@ -723,6 +726,7 @@ namespace FFS.Libraries.StaticEcs {
             _resize = resize;
             _destroy = destroy;
             _hardReset = hardReset;
+            _hardResetChunk = hardResetChunk;
             _tryToStringComponent = tryToStringComponent;
             _writeChunk = writeChunk;
             _readChunk = readChunk;
@@ -779,6 +783,11 @@ namespace FFS.Libraries.StaticEcs {
         [MethodImpl(AggressiveInlining)]
         internal void HardReset() {
             unsafe { _hardReset(); }
+        }
+
+        [MethodImpl(AggressiveInlining)]
+        internal void HardResetChunk(uint chunkIdx) {
+            unsafe { _hardResetChunk(chunkIdx); }
         }
 
         [MethodImpl(AggressiveInlining)]

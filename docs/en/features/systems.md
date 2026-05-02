@@ -311,9 +311,9 @@ Standalone API mirrors `Create/LoadEventsSnapshot`:
 byte[] snapshot = W.Serializer.CreateSystemsSnapshot();
 W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
 
-// Load
+// Load (gzip is autodetected)
 W.Serializer.LoadSystemsSnapshot(snapshot);
-W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+W.Serializer.LoadSystemsSnapshot("systems.bin");
 ```
 
 Full format and migration details: see [Serialization → Systems serialization](./serialization.md).

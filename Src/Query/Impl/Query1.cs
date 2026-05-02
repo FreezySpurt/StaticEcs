@@ -3761,7 +3761,9 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(NoInlining)]
             private static QueryData CreateQueryData<T0>(TFilter filter, bool strict, EntityStatusType entities, ComponentStatus components)
                 where T0 : struct, IComponent {
+                #if FFS_ECS_DEBUG
                 const int block = 1;
+                #endif
                 
                 ref var world = ref Data.Instance;
                 

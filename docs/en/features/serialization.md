@@ -238,11 +238,11 @@ W.Serializer.CreateWorldSnapshot(writeEvents: false);
 // Without custom data
 W.Serializer.CreateWorldSnapshot(withCustomSnapshotData: false);
 
-// Load from file
+// Load from file (gzip is autodetected)
 W.Serializer.LoadWorldSnapshot("path/to/world.bin");
 
-// Load compressed data
-W.Serializer.LoadWorldSnapshot(compressed, gzip: true);
+// Load compressed data (gzip is autodetected)
+W.Serializer.LoadWorldSnapshot(compressed);
 ```
 
 {: .important }
@@ -734,7 +734,7 @@ W.Serializer.CreateResourcesSnapshot("resources.bin", gzip: true);
 
 // Load
 W.Serializer.LoadResourcesSnapshot(snapshot);
-W.Serializer.LoadResourcesSnapshot("resources.bin", gzip: true);
+W.Serializer.LoadResourcesSnapshot("resources.bin");
 ```
 
 On load, entries whose `Guid` is not currently registered are silently skipped (same as removed components or events) — adding or removing a resource type between save and load is forward-compatible.
@@ -809,7 +809,7 @@ W.Serializer.CreateSystemsSnapshot("systems.bin", gzip: true);
 
 // Load
 W.Serializer.LoadSystemsSnapshot(snapshot);
-W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true);
+W.Serializer.LoadSystemsSnapshot("systems.bin");
 ```
 
 Each pipeline section contains its scoped resources (singleton + named) followed by every system within it that declares a `Guid`.
@@ -833,29 +833,37 @@ ___
 
 ## Compression (GZIP)
 
-All snapshot creation and loading methods support GZIP compression:
+All snapshot creation methods support GZIP compression via `gzip: true`. **All** loading methods (`LoadWorldSnapshot`, `LoadClusterSnapshot`, `LoadChunkSnapshot`, `LoadEventsSnapshot`, `LoadResourcesSnapshot`, `LoadSystemsSnapshot`, `RestoreFromGIDStoreSnapshot`) **autodetect** gzip from the byte stream — pass the bytes/path directly without any flag.
 
 ```csharp
-// World
+// World — gzip autodetected on load
 byte[] snapshot = W.Serializer.CreateWorldSnapshot(gzip: true);
-W.Serializer.LoadWorldSnapshot(snapshot, gzip: true);
+W.Serializer.LoadWorldSnapshot(snapshot);
 
-// Cluster
+// Cluster — gzip autodetected on load
 byte[] cluster = W.Serializer.CreateClusterSnapshot(1, gzip: true);
-W.Serializer.LoadClusterSnapshot(cluster, gzip: true);
+W.Serializer.LoadClusterSnapshot(cluster);
 
-// Chunk
+// Chunk — gzip autodetected on load
 byte[] chunk = W.Serializer.CreateChunkSnapshot(0, gzip: true);
-W.Serializer.LoadChunkSnapshot(chunk, gzip: true);
+W.Serializer.LoadChunkSnapshot(chunk);
 
 // GID Store
 byte[] gid = W.Serializer.CreateGIDStoreSnapshot(gzip: true);
 
-// Events
+// Events — gzip autodetected on load
 byte[] events = W.Serializer.CreateEventsSnapshot(gzip: true);
-W.Serializer.LoadEventsSnapshot(events, gzip: true);
+W.Serializer.LoadEventsSnapshot(events);
 
-// Files
+// Resources — gzip autodetected on load
+byte[] resources = W.Serializer.CreateResourcesSnapshot(gzip: true);
+W.Serializer.LoadResourcesSnapshot(resources);
+
+// Systems — gzip autodetected on load
+byte[] systems = W.Serializer.CreateSystemsSnapshot(gzip: true);
+W.Serializer.LoadSystemsSnapshot(systems);
+
+// Files — gzip autodetected on load for world/cluster/chunk/events/resources/systems
 W.Serializer.CreateWorldSnapshot("world.bin", gzip: true);
-W.Serializer.LoadWorldSnapshot("world.bin", gzip: true);
+W.Serializer.LoadWorldSnapshot("world.bin");
 ```

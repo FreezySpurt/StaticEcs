@@ -6290,7 +6290,9 @@ namespace FFS.Libraries.StaticEcs {
                 where T3 : struct, IComponent
                 where T4 : struct, IComponent
                 where T5 : struct, IComponent {
+                #if FFS_ECS_DEBUG
                 const int block = 1;
+                #endif
                 
                 ref var world = ref Data.Instance;
                 

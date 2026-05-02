@@ -575,7 +575,7 @@ namespace FFS.Libraries.StaticEcs {
             [MethodImpl(AggressiveInlining)]
             internal static void WriteSingleton(ref BinaryPackWriter writer) {
                 if (ResourceTypeMeta<T>.Unmanaged) {
-                    WriteUnmanagedRef(ref writer, ref Resources<TScope, T>.Value);
+                    writer.ForceWriteUnmanaged(in Resources<TScope, T>.Value);
                 } else {
                     Resources<TScope, T>.Value.Write(ref writer);
                 }
@@ -586,7 +586,7 @@ namespace FFS.Libraries.StaticEcs {
                 ref var value = ref Resources<TScope, T>.Value;
                 var currentVersion = value.Version();
                 if (savedUnmanaged && ResourceTypeMeta<T>.Unmanaged && savedVersion == currentVersion) {
-                    ReadUnmanagedRef(ref reader, ref value);
+                    reader.ForceReadUnmanaged(out value);
                 } else {
                     #if FFS_ECS_DEBUG
                     if (!ResourceTypeMeta<T>.HasRead) {
@@ -602,7 +602,7 @@ namespace FFS.Libraries.StaticEcs {
             internal static void WriteNamedResource(ref BinaryPackWriter writer, string key) {
                 var box = (NamedResources<TScope>.Box<T>)NamedResources<TScope>.Values[key];
                 if (ResourceTypeMeta<T>.Unmanaged) {
-                    WriteUnmanagedRef(ref writer, ref box.Value);
+                    writer.ForceWriteUnmanaged(in box.Value);
                 } else {
                     box.Value.Write(ref writer);
                 }
@@ -613,7 +613,7 @@ namespace FFS.Libraries.StaticEcs {
                 var box = (NamedResources<TScope>.Box<T>)NamedResources<TScope>.Values[key];
                 var currentVersion = box.Value.Version();
                 if (savedUnmanaged && ResourceTypeMeta<T>.Unmanaged && savedVersion == currentVersion) {
-                    ReadUnmanagedRef(ref reader, ref box.Value);
+                    reader.ForceReadUnmanaged(out box.Value);
                 } else {
                     #if FFS_ECS_DEBUG
                     if (!ResourceTypeMeta<T>.HasRead) {
@@ -623,21 +623,6 @@ namespace FFS.Libraries.StaticEcs {
                     #endif
                     box.Value.Read(ref reader, savedVersion);
                 }
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            private static void WriteUnmanagedRef(ref BinaryPackWriter writer, ref T value) {
-                var size = (uint)ResourceTypeMeta<T>.UnmanagedSize;
-                writer.EnsureSize(size);
-                Unsafe.WriteUnaligned(ref writer.Buffer[writer.Position], value);
-                writer.Position += size;
-            }
-
-            [MethodImpl(AggressiveInlining)]
-            private static void ReadUnmanagedRef(ref BinaryPackReader reader, ref T value) {
-                var size = (uint)ResourceTypeMeta<T>.UnmanagedSize;
-                value = Unsafe.ReadUnaligned<T>(ref reader.Buffer[reader.Position]);
-                reader.Position += size;
             }
         }
     }

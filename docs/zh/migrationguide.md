@@ -4,6 +4,62 @@ parent: ZH
 nav_order: 5
 ---
 
+# 从 2.2.0 迁移到 2.2.1
+
+## 快照加载方法：自动检测 gzip，删除 `byteSizeHint`
+
+所有 standalone 快照加载器 — `LoadWorldSnapshot` / `LoadClusterSnapshot` / `LoadChunkSnapshot` / `LoadEventsSnapshot` / `LoadResourcesSnapshot` / `LoadSystemsSnapshot` / `RestoreFromGIDStoreSnapshot` — 不再接受 `gzip` 和 `byteSizeHint` 参数。Gzip 通过字节流中的 RFC 1952 魔数 `0x1F 0x8B` 自动检测，缓冲区大小从快照的 10 字节头（`ushort` 格式版本 + `ulong` payload 大小）读取。`Create*Snapshot` / `Load*Snapshot` / `RestoreFromGIDStoreSnapshot` 的所有公共 `(ref BinaryPackWriter)` / `(BinaryPackReader)` 重载（事件 / 资源 / 系统 / GID-store）现在也写入和读取相同的头 — 把这些调用嵌入到自定义 writer 的复合场景每个块会多出 10 字节。World snapshot 中的嵌入式序列化仍然使用内部无头路径，没有变化。
+
+```csharp
+// 之前（2.2.0）
+W.Serializer.LoadWorldSnapshot(bytes, gzip: true, hardReset: true);
+W.Serializer.LoadWorldSnapshot("world.bin", gzip: true, byteSizeHint: 1_000_000, hardReset: true);
+W.Serializer.LoadClusterSnapshot(bytes, gzip: true, entitiesAsNew);
+W.Serializer.LoadChunkSnapshot("chunk.bin", gzip: true, byteSizeHint: 0);
+W.Serializer.LoadEventsSnapshot(bytes, gzip: true);
+W.Serializer.LoadEventsSnapshot("events.bin", gzip: true, byteSizeHint: 4096);
+W.Serializer.LoadResourcesSnapshot(bytes, gzip: true);
+W.Serializer.LoadResourcesSnapshot("resources.bin", gzip: true, byteSizeHint: 4096);
+W.Serializer.LoadSystemsSnapshot(bytes, gzip: true);
+W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true, byteSizeHint: 4096);
+W.Serializer.RestoreFromGIDStoreSnapshot(bytes, gzip: true, hardReset: true);
+W.Serializer.RestoreFromGIDStoreSnapshot("gid.bin", gzip: true, byteSizeHint: 0, hardReset: true);
+
+// 现在（2.2.1）
+W.Serializer.LoadWorldSnapshot(bytes, hardReset: true);
+W.Serializer.LoadWorldSnapshot("world.bin", hardReset: true);
+W.Serializer.LoadClusterSnapshot(bytes, entitiesAsNew);
+W.Serializer.LoadChunkSnapshot("chunk.bin");
+W.Serializer.LoadEventsSnapshot(bytes);
+W.Serializer.LoadEventsSnapshot("events.bin");
+W.Serializer.LoadResourcesSnapshot(bytes);
+W.Serializer.LoadResourcesSnapshot("resources.bin");
+W.Serializer.LoadSystemsSnapshot(bytes);
+W.Serializer.LoadSystemsSnapshot("systems.bin");
+W.Serializer.RestoreFromGIDStoreSnapshot(bytes, hardReset: true);
+W.Serializer.RestoreFromGIDStoreSnapshot("gid.bin", hardReset: true);
+```
+
+## `LoadClusterSnapshot` 校验目标块
+
+使用 `entitiesAsNew: false` 加载集群快照时，如果目标块已经包含活动实体，现在会抛出 `StaticEcsException`，而不再静默地损坏状态。在加载之前先卸载或销毁目标块中的实体：
+
+```csharp
+ReadOnlySpan<ushort> targetClusters = stackalloc ushort[] { clusterId };
+W.Query().BatchUnload(EntityStatusType.Any, clusters: targetClusters);
+W.Serializer.LoadClusterSnapshot(snapshot); // entitiesAsNew: false
+```
+
+## 快照格式版本提升到 2
+
+世界 / 集群 / 块快照的布局发生了变化（按 `UsedSegmentsMask` 进行的稀疏分段序列化，按 64 位掩码进行的稀疏 event-page 序列化）。`SnapshotFormatVersion` 现在为 `2`。**2.2.0 生成的快照无法被 2.2.1 加载** — 请先用 2.2.0 构建一次性重新保存这些快照，然后在 2.2.1 中加载，或从权威的游戏状态重新生成。
+
+## StaticPack 依赖：1.1.0 → 1.2.5
+
+`FFS.StaticPack` 包引用提升到 `1.2.5`。如果您在自己的项目中直接引用 StaticPack，请更新版本。新的 API `BinaryPackReader.RentAndFillFromBytes` / `RentAndFillFromFile` / `BinaryPackWriter.ForceWriteUnmanaged` / `BinaryPackReader.ForceReadUnmanaged` 是上述简化的底层支持。
+
+___
+
 # 从 2.1.x 迁移到 2.2.0
 
 ## 资源现在需要 `IResource`

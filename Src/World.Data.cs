@@ -106,6 +106,7 @@ namespace FFS.Libraries.StaticEcs {
     public struct HeuristicChunk {
         internal AtomicMask NotEmptyBlocks;
         internal AtomicMask FullBlocks;
+        internal ushort UsedSegmentsMask;
     }
     #endregion
 
@@ -293,6 +294,8 @@ namespace FFS.Libraries.StaticEcs {
             private uint _multiStorageResizersCount;
             private Action[] _multiStorageResetters;
             private uint _multiStorageResettersCount;
+            private Action<uint>[] _multiStorageChunkResetters;
+            private uint _multiStorageChunkResettersCount;
 
             // QUERY
             private readonly QueryData[] _queriesToUpdateOnDisable;
@@ -446,7 +449,9 @@ namespace FFS.Libraries.StaticEcs {
                 _multiStorageResizers = null;
                 _multiStorageResizersCount = 0;
                 _multiStorageResetters = null;
+                _multiStorageChunkResetters = null;
                 _multiStorageResettersCount = 0;
+                _multiStorageChunkResettersCount = 0;
 
                 // ENTITY TYPE RESETTERS
                 EntityTypeResetters = null;
@@ -641,7 +646,7 @@ namespace FFS.Libraries.StaticEcs {
 
                 for (var i = 0; i < BitMaskComponents.Length; i++) {
                     Array.Clear(BitMaskComponents[i], 0, BitMaskComponents[i].Length);
-                }
+                    }
 
                 for (var i = 0; i < EntitiesSegments.Length; i++) {
                     ref var segment = ref EntitiesSegments[i];
@@ -651,12 +656,12 @@ namespace FFS.Libraries.StaticEcs {
                         for (var v = 0; v < versions.Length; v++) {
                             var ver = (ushort)(versions[v] + 1);
                             versions[v] = ver == 0 ? (ushort)1 : ver;
-                        }
+                }
                     }
                     segment.ClusterId = EntitiesSegment.InvalidCluster;
                     segment.EntityType = EntitiesSegment.NoEntityType;
 
-                    if (TrackCreated) {
+                if (TrackCreated) {
                         if (TrackingBufferSize > 0) {
                             var totalSlots = TrackingBufferSize + 1;
                             for (var slot = 0; slot < totalSlots; slot++) {
@@ -740,6 +745,15 @@ namespace FFS.Libraries.StaticEcs {
                     Array.Resize(ref _multiStorageResetters, (int)(_multiStorageResettersCount << 1));
                 }
                 _multiStorageResetters[_multiStorageResettersCount++] = resetter;
+            }
+
+            [MethodImpl(AggressiveInlining)]
+            internal void RegisterMultiStorageChunkResetter(Action<uint> resetter) {
+                _multiStorageChunkResetters ??= new Action<uint>[16];
+                if (_multiStorageChunkResettersCount == _multiStorageChunkResetters.Length) {
+                    Array.Resize(ref _multiStorageChunkResetters, (int)(_multiStorageChunkResettersCount << 1));
+                }
+                _multiStorageChunkResetters[_multiStorageChunkResettersCount++] = resetter;
             }
             #endregion
 
@@ -1435,6 +1449,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (entitiesMask == 0) {
                     var chunkBlockMask = 1UL << (segmentBlocksOffset + segmentBlockIdx);
                     heuristic.NotEmptyBlocks.Value |= chunkBlockMask;
+                    heuristic.UsedSegmentsMask |= (ushort)(1 << segmentInChunk);
                     ref var loaded = ref HeuristicLoadedChunks[chunkIdx];
                     if (loaded.Value == 0) {
                         cluster.LoadedChunks[cluster.LoadedChunksCount++] = chunkIdx;
@@ -1563,6 +1578,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (entitiesMask == 0) {
                     var chunkBlockMask = 1UL << chunkBlockIdx;
                     heuristic.NotEmptyBlocks.Value |= chunkBlockMask;
+                    heuristic.UsedSegmentsMask |= (ushort)(1 << (chunkBlockIdx >> Const.BLOCKS_IN_SEGMENT_SHIFT));
                     segment.EntityType = entityType;
                     #if FFS_ECS_BURST
                     LifecycleHandle.OnSegmentEntityTypeChanged(segmentIdx, entityType);
@@ -1668,6 +1684,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (entitiesMask == 0) {
                     var chunkBlockMask = 1UL << chunkBlockIdx;
                     HeuristicChunks[chunkIdx].NotEmptyBlocks.Value |= chunkBlockMask;
+                    HeuristicChunks[chunkIdx].UsedSegmentsMask |= (ushort)(1 << (chunkBlockIdx >> Const.BLOCKS_IN_SEGMENT_SHIFT));
                     ref var loaded = ref HeuristicLoadedChunks[chunkIdx];
                     if (loaded.Value == 0) {
                         ref var cluster = ref Clusters[gid.ClusterId];
@@ -1744,6 +1761,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (entitiesMask == 0) {
                     var chunkBlockMask = 1UL << (segmentBlocksOffset + segmentBlockIdx);
                     heuristic.NotEmptyBlocks.Value |= chunkBlockMask;
+                    heuristic.UsedSegmentsMask |= (ushort)(1 << segmentInChunk);
                     ref var loaded = ref HeuristicLoadedChunks[chunkIdx];
                     if (loaded.Value == 0) {
                         cluster.LoadedChunks[cluster.LoadedChunksCount++] = chunkIdx;
@@ -3063,25 +3081,32 @@ namespace FFS.Libraries.StaticEcs {
                 writer.WriteUlong(heuristic.NotEmptyBlocks.Value);
                 writer.WriteUlong(heuristic.FullBlocks.Value);
                 writer.WriteUshort(EntitiesSegments[baseSegmentIdx].ClusterId);
+                writer.WriteUshort(heuristic.UsedSegmentsMask);
 
                 if (heuristic.NotEmptyBlocks.Value != 0) {
+                    var notEmpty = heuristic.NotEmptyBlocks.Value;
                     for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
-                        writer.WriteArrayUnmanaged(EntitiesSegments[baseSegmentIdx + s].Masks, 0, Const.BLOCKS_IN_SEGMENT * 2);
+                        if ((notEmpty & SegmentsMaskCache[s]) != 0) {
+                            writer.WriteArrayUnmanaged(EntitiesSegments[baseSegmentIdx + s].Masks, 0, Const.BLOCKS_IN_SEGMENT * 2);
+                        }
                     }
                     if (fullWorld) {
-                        writer.WriteUlong(HeuristicLoadedChunks[chunkIdx].Value);
+                        var loaded = HeuristicLoadedChunks[chunkIdx].Value;
+                        writer.WriteUlong(loaded);
                         for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
-                            writer.WriteArrayUnmanaged(EntitiesSegments[baseSegmentIdx + s].Masks, Const.BLOCKS_IN_SEGMENT * 2, Const.BLOCKS_IN_SEGMENT);
+                            if ((loaded & SegmentsMaskCache[s]) != 0) {
+                                writer.WriteArrayUnmanaged(EntitiesSegments[baseSegmentIdx + s].Masks, Const.BLOCKS_IN_SEGMENT * 2, Const.BLOCKS_IN_SEGMENT);
+                            }
                         }
                     }
                 }
 
-                for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
-                    writer.WriteArrayUnmanaged(EntitiesSegments[baseSegmentIdx + s].Versions, 0, Const.ENTITIES_IN_SEGMENT);
-                }
-
-                for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
-                    writer.WriteUshort(EntitiesSegments[baseSegmentIdx + s].EntityType);
+                var remainingUsedMask = heuristic.UsedSegmentsMask;
+                while (remainingUsedMask != 0) {
+                    var segmentInChunk = Utils.Lsb(remainingUsedMask);
+                    remainingUsedMask &= (ushort)(remainingUsedMask - 1);
+                    writer.WriteArrayUnmanaged(EntitiesSegments[baseSegmentIdx + segmentInChunk].Versions, 0, Const.ENTITIES_IN_SEGMENT);
+                    writer.WriteUshort(EntitiesSegments[baseSegmentIdx + segmentInChunk].EntityType);
                 }
             }
 
@@ -3094,30 +3119,39 @@ namespace FFS.Libraries.StaticEcs {
                 heuristic.NotEmptyBlocks.Value = reader.ReadUlong();
                 heuristic.FullBlocks.Value = reader.ReadUlong();
                 var clusterId = reader.ReadUshort();
+                var usedMask = reader.ReadUshort();
                 SetChunkSegmentsCluster(chunkIdx, clusterId, selfOwner);
+                heuristic.UsedSegmentsMask = usedMask;
                 HeuristicLoadedChunks[chunkIdx].Value = 0;
 
                 if (heuristic.NotEmptyBlocks.Value != 0) {
+                    var notEmpty = heuristic.NotEmptyBlocks.Value;
                     for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
-                        reader.ReadArrayUnmanaged(ref EntitiesSegments[baseSegmentIdx + s].Masks, 0);
+                        if ((notEmpty & SegmentsMaskCache[s]) != 0) {
+                            reader.ReadArrayUnmanaged(ref EntitiesSegments[baseSegmentIdx + s].Masks, 0);
+                        }
                     }
                     if (fullWorld) {
-                        HeuristicLoadedChunks[chunkIdx].Value = reader.ReadUlong();
+                        var loaded = reader.ReadUlong();
+                        HeuristicLoadedChunks[chunkIdx].Value = loaded;
                         for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
-                            reader.ReadArrayUnmanaged(ref EntitiesSegments[baseSegmentIdx + s].Masks, Const.BLOCKS_IN_SEGMENT * 2);
+                            if ((loaded & SegmentsMaskCache[s]) != 0) {
+                                reader.ReadArrayUnmanaged(ref EntitiesSegments[baseSegmentIdx + s].Masks, Const.BLOCKS_IN_SEGMENT * 2);
+                            }
                         }
                     }
                 }
 
-                for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
-                    reader.ReadArrayUnmanaged(ref EntitiesSegments[baseSegmentIdx + s].Versions);
-                }
-
-                for (var s = 0; s < Const.SEGMENTS_IN_CHUNK; s++) {
-                    var et = reader.ReadUshort();
-                    EntitiesSegments[baseSegmentIdx + s].EntityType = et;
+                var remainingUsedMask = usedMask;
+                while (remainingUsedMask != 0) {
+                    var segmentInChunk = Utils.Lsb(remainingUsedMask);
+                    remainingUsedMask &= (ushort)(remainingUsedMask - 1);
+                    ref var usedSegment = ref EntitiesSegments[baseSegmentIdx + segmentInChunk];
+                    reader.ReadArrayUnmanaged(ref usedSegment.Versions);
+                    var entityType = reader.ReadUshort();
+                    usedSegment.EntityType = entityType;
                     #if FFS_ECS_BURST
-                    LifecycleHandle.OnSegmentEntityTypeChanged((uint)(baseSegmentIdx + s), et);
+                    LifecycleHandle.OnSegmentEntityTypeChanged((uint)(baseSegmentIdx + segmentInChunk), entityType);
                     #endif
                 }
 

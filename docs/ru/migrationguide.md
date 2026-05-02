@@ -4,6 +4,62 @@ parent: RU
 nav_order: 5
 ---
 
+# Миграция с 2.2.0 на 2.2.1
+
+## Загрузчики снимков: gzip определяется автоматически, `byteSizeHint` удалён
+
+Все standalone-загрузчики снимков — `LoadWorldSnapshot` / `LoadClusterSnapshot` / `LoadChunkSnapshot` / `LoadEventsSnapshot` / `LoadResourcesSnapshot` / `LoadSystemsSnapshot` / `RestoreFromGIDStoreSnapshot` — больше не принимают параметры `gzip` и `byteSizeHint`. Gzip определяется автоматически по магической последовательности `0x1F 0x8B` (RFC 1952), а размер буфера читается из 10-байтового заголовка снимка (`ushort` версия формата + `ulong` размер payload). Все публичные перегрузки `(ref BinaryPackWriter)` / `(BinaryPackReader)` методов `Create*Snapshot` / `Load*Snapshot` / `RestoreFromGIDStoreSnapshot` (events / resources / systems / GID-store) теперь тоже пишут и читают этот заголовок — composite-сценарии, которые встраивают такие вызовы в свой writer, увидят +10 байт на блок. Embedded-сериализация внутри World snapshot по-прежнему идёт через internal header-less путь и не изменилась.
+
+```csharp
+// Было (2.2.0)
+W.Serializer.LoadWorldSnapshot(bytes, gzip: true, hardReset: true);
+W.Serializer.LoadWorldSnapshot("world.bin", gzip: true, byteSizeHint: 1_000_000, hardReset: true);
+W.Serializer.LoadClusterSnapshot(bytes, gzip: true, entitiesAsNew);
+W.Serializer.LoadChunkSnapshot("chunk.bin", gzip: true, byteSizeHint: 0);
+W.Serializer.LoadEventsSnapshot(bytes, gzip: true);
+W.Serializer.LoadEventsSnapshot("events.bin", gzip: true, byteSizeHint: 4096);
+W.Serializer.LoadResourcesSnapshot(bytes, gzip: true);
+W.Serializer.LoadResourcesSnapshot("resources.bin", gzip: true, byteSizeHint: 4096);
+W.Serializer.LoadSystemsSnapshot(bytes, gzip: true);
+W.Serializer.LoadSystemsSnapshot("systems.bin", gzip: true, byteSizeHint: 4096);
+W.Serializer.RestoreFromGIDStoreSnapshot(bytes, gzip: true, hardReset: true);
+W.Serializer.RestoreFromGIDStoreSnapshot("gid.bin", gzip: true, byteSizeHint: 0, hardReset: true);
+
+// Стало (2.2.1)
+W.Serializer.LoadWorldSnapshot(bytes, hardReset: true);
+W.Serializer.LoadWorldSnapshot("world.bin", hardReset: true);
+W.Serializer.LoadClusterSnapshot(bytes, entitiesAsNew);
+W.Serializer.LoadChunkSnapshot("chunk.bin");
+W.Serializer.LoadEventsSnapshot(bytes);
+W.Serializer.LoadEventsSnapshot("events.bin");
+W.Serializer.LoadResourcesSnapshot(bytes);
+W.Serializer.LoadResourcesSnapshot("resources.bin");
+W.Serializer.LoadSystemsSnapshot(bytes);
+W.Serializer.LoadSystemsSnapshot("systems.bin");
+W.Serializer.RestoreFromGIDStoreSnapshot(bytes, hardReset: true);
+W.Serializer.RestoreFromGIDStoreSnapshot("gid.bin", hardReset: true);
+```
+
+## `LoadClusterSnapshot` проверяет целевые чанки
+
+Загрузка снимка кластера с `entitiesAsNew: false` в чанки, уже содержащие активные сущности, теперь явно бросает `StaticEcsException` вместо тихой порчи данных. Перед загрузкой нужно выгрузить или уничтожить сущности в целевых чанках:
+
+```csharp
+ReadOnlySpan<ushort> targetClusters = stackalloc ushort[] { clusterId };
+W.Query().BatchUnload(EntityStatusType.Any, clusters: targetClusters);
+W.Serializer.LoadClusterSnapshot(snapshot); // entitiesAsNew: false
+```
+
+## Версия формата снимков повышена до 2
+
+Изменился layout снимков мира / кластера / чанка (sparse-сериализация сегментов по `UsedSegmentsMask`, sparse-сериализация event-страниц по 64-битным маскам). `SnapshotFormatVersion` теперь равна `2`. Снимки, созданные сборкой 2.2.0, **не загружаются** в 2.2.1 — их нужно однократно пересохранить сборкой 2.2.0 и затем загрузить в 2.2.1, либо перегенерировать из авторитетного состояния игры.
+
+## Зависимость StaticPack: 1.1.0 → 1.2.5
+
+Версия пакета `FFS.StaticPack` поднята до `1.2.5`. Если вы используете StaticPack напрямую в своих проектах, обновите версию. Новые API `BinaryPackReader.RentAndFillFromBytes` / `RentAndFillFromFile` / `BinaryPackWriter.ForceWriteUnmanaged` / `BinaryPackReader.ForceReadUnmanaged` лежат в основе упрощений выше.
+
+___
+
 # Миграция с 2.1.x на 2.2.0
 
 ## Disable/Enable теперь opt-in через `IDisableable`
