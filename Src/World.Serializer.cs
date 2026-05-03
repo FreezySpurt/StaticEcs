@@ -2101,15 +2101,16 @@ namespace FFS.Libraries.StaticEcs {
                 /// <inheritdoc cref="CreateSnapshot(bool, bool)"/>
                 /// <param name="result">Reference to the destination byte array. Resized if necessary.</param>
                 [MethodImpl(AggressiveInlining)]
-                public void CreateSnapshot(ref byte[] result, bool withCustomSnapshotData = true, bool gzip = false) {
+                public int CreateSnapshot(ref byte[] result, bool withCustomSnapshotData = true, bool gzip = false) {
                     #if FFS_ECS_DEBUG
                     Assert("EntitiesWriter", !Destroyed, "EntitiesWriter is destroyed");
                     #endif
                     Writer.WriteUintAt(0, EntitiesCount);
                     CreateCustomSnapshot(withCustomSnapshotData);
-                    Writer.CopyToBytes(ref result, gzip);
+                    var count = Writer.CopyToBytes(ref result, gzip);
                     Writer.Position = StartWriterPosition;
                     EntitiesCount = 0;
+                    return count;
                 }
 
                 /// <inheritdoc cref="CreateSnapshot(bool, bool)"/>
