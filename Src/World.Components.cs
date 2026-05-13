@@ -2002,7 +2002,7 @@ namespace FFS.Libraries.StaticEcs {
                     }
                 }
                 Unmanaged = isTag || !RuntimeHelpers.IsReferenceOrContainsReferences<T>();
-                UnmanagedSize = !isTag && Unmanaged ? Unsafe.SizeOf<T>() : 0;
+                UnmanagedSize = !isTag && Unmanaged ? BinaryPack.SizeOf<T>() : 0;
                 DataLifecycle = !isTag && !config.NoDataLifecycle.Value;
                 DefaultValue = config.DefaultValue ?? default;
                 HasDefaultValue = config.DefaultValue.HasValue;

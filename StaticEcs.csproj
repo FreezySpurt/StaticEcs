@@ -12,7 +12,7 @@
         <NoWarn>$(NoWarn);IL2091</NoWarn>
         <RootNamespace>FFS.Libraries.StaticEcs</RootNamespace>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>2.2.2</Version>
+        <Version>2.2.3</Version>
         <Authors>Felid-Force-Studios</Authors>
         <Description>C# Hierarchical Inverted Bitmap ECS framework</Description>
         <Copyright>Felid-Force-Studios</Copyright>
@@ -63,14 +63,10 @@
     </ItemGroup>
 
     <ItemGroup Condition="'$(Configuration)' == 'Debug'">
-        <PackageReference Include="FFS.StaticPack.Debug" Version="1.2.5" />
+        <PackageReference Include="FFS.StaticPack.Debug" Version="1.2.6" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(Configuration)' == 'Release'">
-        <PackageReference Include="FFS.StaticPack" Version="1.2.5" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-        <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+        <PackageReference Include="FFS.StaticPack" Version="1.2.6" />
     </ItemGroup>
 </Project>
