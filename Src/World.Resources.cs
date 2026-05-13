@@ -671,7 +671,7 @@ namespace FFS.Libraries.StaticEcs {
             [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicMethods)]
             #endif
             Type t, string name, Type[] parameters) {
-            return t.GetMethod(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly,
+            return t.GetMethod(name, BindingFlags.Instance | BindingFlags.Public,
                 binder: null, types: parameters, modifiers: null) != null;
         }
     }
