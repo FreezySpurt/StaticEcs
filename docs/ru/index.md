@@ -7,7 +7,7 @@ parent: Main page
 <p align="center">
   <img src="../fulllogo.png" alt="Static ECS" width="100%">
   <br><br>
-  <img src="https://img.shields.io/badge/version-2.2.2-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.3-blue?style=for-the-badge" alt="Version">
   <a href="https://felid-force-studios.github.io/StaticEcs/ru/"><img src="https://img.shields.io/badge/Docs-документация-blueviolet?style=for-the-badge" alt="Документация"></a>
   <a href="https://gist.github.com/blackbone/6d254a684cf580441bf58690ad9485c3"><img src="https://img.shields.io/badge/Benchmarks-результаты-green?style=for-the-badge" alt="Benchmarks"></a>
   <a href="https://github.com/Felid-Force-Studios/StaticEcs-Unity"><img src="https://img.shields.io/badge/Unity-модуль-orange?style=for-the-badge&logo=unity" alt="Unity модуль"></a>
@@ -78,7 +78,7 @@ parent: Main page
 <a href="https://www.buymeacoffee.com/felid.force.studios" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="60"></a>
 
 # Установка
-Библиотека имеет зависимость на [StaticPack](https://github.com/Felid-Force-Studios/StaticPack) версии `1.2.5` для бинарной сериализации, StaticPack должен быть так же установлен
+Библиотека имеет зависимость на [StaticPack](https://github.com/Felid-Force-Studios/StaticPack) версии `1.2.6` для бинарной сериализации, StaticPack должен быть так же установлен
 * ### В виде исходников
   Со страницы релизов или как архив из нужной ветки. В ветке `master` стабильная проверенная версия
 * ### Установка для Unity

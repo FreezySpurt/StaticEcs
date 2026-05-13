@@ -652,7 +652,7 @@ namespace FFS.Libraries.StaticEcs {
                 Unmanaged = t.IsValueType && !RuntimeHelpers.IsReferenceOrContainsReferences<T>();
                 HasWrite = HasMethod(t, nameof(IResource.Write), WriteParams);
                 HasRead = HasMethod(t, nameof(IResource.Read), ReadParams);
-                UnmanagedSize = Unmanaged ? Unsafe.SizeOf<T>() : 0;
+                UnmanagedSize = Unmanaged ? BinaryPack.SizeOf<T>() : 0;
                 _initialized = true;
             }
 

@@ -5,7 +5,7 @@
   <a href="./README_RU.md"><img src="https://img.shields.io/badge/RU-Русский-blue?style=flat-square" alt="Русский"></a>
   <a href="./README_ZH.md"><img src="https://img.shields.io/badge/ZH-中文-blue?style=flat-square" alt="中文"></a>
   <br><br>
-  <img src="https://img.shields.io/badge/version-2.2.2-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.3-blue?style=for-the-badge" alt="Version">
   <a href="https://www.nuget.org/packages/FFS.StaticEcs/"><img src="https://img.shields.io/badge/NuGet-FFS.StaticEcs-004880?style=for-the-badge&logo=nuget" alt="NuGet"></a>
   <a href="https://felid-force-studios.github.io/StaticEcs/en/"><img src="https://img.shields.io/badge/Docs-documentation-blueviolet?style=for-the-badge" alt="Documentation"></a>
   <a href="https://gist.github.com/blackbone/6d254a684cf580441bf58690ad9485c3"><img src="https://img.shields.io/badge/Benchmarks-results-green?style=for-the-badge" alt="Benchmarks"></a>
@@ -76,7 +76,7 @@ If you like Static ECS and it helps your project, you can support its developmen
 <a href="https://www.buymeacoffee.com/felid.force.studios" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="60"></a>
 
 # Installation
-The library has a dependency on [StaticPack](https://github.com/Felid-Force-Studios/StaticPack) `1.2.5` for binary serialization, StaticPack must also be installed
+The library has a dependency on [StaticPack](https://github.com/Felid-Force-Studios/StaticPack) `1.2.6` for binary serialization, StaticPack must also be installed
 * ### As source code
   From the release page or as an archive from the branch. In the `master` branch there is a stable tested version
 * ### Installation for Unity
