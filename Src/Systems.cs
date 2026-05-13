@@ -736,7 +736,7 @@ namespace FFS.Libraries.StaticEcs {
             Type structType, string methodName, Type[] parameterTypes) {
             return structType.GetMethod(
                 methodName,
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly,
+                BindingFlags.Instance | BindingFlags.Public,
                 binder: null,
                 types: parameterTypes,
                 modifiers: null
