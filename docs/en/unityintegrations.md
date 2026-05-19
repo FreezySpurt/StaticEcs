@@ -42,7 +42,7 @@ public struct Velocity : IComponent {
 
 // Scene data — passed from MonoBehaviour via resource
 [Serializable]
-public class SceneData {
+public class SceneData : IResource {
     public GameObject EntityPrefab;
 }
 
@@ -97,9 +97,6 @@ public class Startup : MonoBehaviour {
         // Initialize the world and systems
         W.Initialize();
         GameSys.Initialize();
-
-        // Connect system debugging
-        EcsDebug<WT>.AddSystem<GameSystems>();
     }
 
     private void Update() {
