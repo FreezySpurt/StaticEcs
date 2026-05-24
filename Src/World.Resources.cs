@@ -114,6 +114,15 @@ namespace FFS.Libraries.StaticEcs {
             }
 
             /// <summary>
+            /// Read-only counterpart to <see cref="Value"/>. Returns a <c>ref readonly</c> view of the
+            /// resource value. 
+            /// </summary>
+            public ref readonly T ValueRO {
+                [MethodImpl(AggressiveInlining)]
+                get => ref Resources<TWorld, T>.Value;
+            }
+
+            /// <summary>
             /// Sets (or replaces) the resource value. Equivalent to <see cref="SetResource{TResource}(TResource, bool)"/>.
             /// </summary>
             /// <param name="value">The resource value to store.</param>
@@ -200,6 +209,23 @@ namespace FFS.Libraries.StaticEcs {
             /// </para>
             /// </summary>
             public ref T Value {
+                [MethodImpl(AggressiveInlining)]
+                get {
+                    if (_cache == null || !_cache.IsValid) {
+                        if (!NamedResources<TWorld>.Values.TryGetValue(Key, out var boxObj)) {
+                            throw new StaticEcsException($"NamedResource<{typeof(T).Name}> with key '{Key}' not found in World<{typeof(TWorld).Name}>");
+                        }
+                        _cache = (NamedResources<TWorld>.BoxBase)boxObj;
+                    }
+                    return ref ((NamedResources<TWorld>.Box<T>)_cache).Value;
+                }
+            }
+
+            /// <summary>
+            /// Read-only counterpart to <see cref="Value"/>. Returns a <c>ref readonly</c> view of the
+            /// resource value. 
+            /// </summary>
+            public ref readonly T ValueRO {
                 [MethodImpl(AggressiveInlining)]
                 get {
                     if (_cache == null || !_cache.IsValid) {

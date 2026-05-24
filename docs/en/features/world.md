@@ -263,6 +263,12 @@ uint capacity = W.CalculateEntitiesCapacity();
 
 // Destroy all entities in the world (world remains initialized)
 W.DestroyAllLoadedEntities();
+
+// Safe registration checks — never throw, work in any world state
+// (return false before Types().X<T>() is called and after Destroy())
+bool componentRegistered = W.IsComponentTypeRegistered<Position>();
+bool tagRegistered = W.IsTagTypeRegistered<IsPlayer>();
+bool eventRegistered = W.IsEventTypeRegistered<OnDamage>();
 ```
 
 ___

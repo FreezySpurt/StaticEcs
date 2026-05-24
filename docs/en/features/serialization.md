@@ -194,6 +194,45 @@ W.Types().Event<OnDamage>();
 
 ___
 
+## Excluding types from serialization
+
+Implementing the marker interface `INonSerializable` on a type excludes its data from **every** snapshot the world produces (`WorldSnapshot`, `ChunkSnapshot`, `ClusterSnapshot`, `EntitiesSnapshot`). Applicable to any type registered as a component, tag, event, link, multi-link or multi-component.
+
+```csharp
+// Component excluded from snapshots
+public struct CachedTransform : IComponent, INonSerializable {
+    public Matrix4x4 Value;
+}
+
+// Tag excluded from snapshots
+public struct IsHovered : ITag, INonSerializable { }
+
+// Event excluded from snapshots
+public struct OnTick : IEvent, INonSerializable { }
+
+// Link/Links/Multi: marker is placed on the user's link/value type,
+// not on Link<T> / Links<T> / Multi<T>
+public struct VolatileTarget : ILinkType, INonSerializable {
+    public void OnAdd<TW>(World<TW>.Entity self, EntityGID value) where TW : struct, IWorldType { }
+    public void OnDelete<TW>(World<TW>.Entity self, EntityGID value, HookReason reason) where TW : struct, IWorldType { }
+    public void CopyTo<TW>(World<TW>.Entity self, World<TW>.Entity other, EntityGID value) where TW : struct, IWorldType { }
+}
+```
+
+The marker affects **only serialization**. All runtime behavior — `Add`/`Set`/`Has`/`Query`, lifecycle hooks (`OnAdd`/`OnDelete`/`CopyTo`), enable/disable, `Destroy`/`Unload`, change tracking, type-erased handles — works identically to a regular type. The type still has a `Guid`, `DynamicId`, a pool, bitmasks, etc.
+
+What the marker does on the **write** path:
+- The type's pool is skipped when writing chunks (`WorldSnapshot` / `ChunkSnapshot` / `ClusterSnapshot`) — neither the per-pool header nor the per-entity components belonging to that type are emitted.
+- The type's events are skipped when writing the event ring buffer.
+- The per-entity component bitmask written into `EntitiesSnapshot` excludes bits for non-serializable pools.
+- Resulting snapshot size shrinks by exactly the bytes that would otherwise belong to the excluded type.
+
+What the marker does on the **read** path: nothing. If a snapshot already contains data for a type that is now marked `INonSerializable`, the reader still restores that data via the standard GUID lookup. This keeps older snapshots loadable. Use a delete migrator (see *Migration of removed types*) only if the type is **also** unregistered.
+
+The flag is also visible at runtime on the type-erased handles — `ComponentsHandle.NonSerializable` and `EventsHandle.NonSerializable` mirror `INonSerializable` on the registered type, which is useful for custom tooling, debug dumps and custom serializers.
+
+___
+
 ## World Snapshot
 
 Saves the full world state: all entities, components, tags, events, and change tracking state.

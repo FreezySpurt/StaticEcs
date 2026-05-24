@@ -152,6 +152,11 @@ ref var last = ref items[items.Length - 1];
 ref var f = ref items.First();
 ref var l = ref items.Last();
 
+// Read-only counterparts — `ref readonly` accessors, no defensive copies
+ref readonly var firstRO = ref items.GetFirst();
+ref readonly var lastRO  = ref items.GetLast();
+ref readonly var itemRO  = ref items.Get(0);
+
 // Span for direct memory access
 Span<Item> span = items.AsSpan;
 ReadOnlySpan<Item> roSpan = items.AsReadOnlySpan;
@@ -277,7 +282,19 @@ for (int i = 0; i < items.Length; i++) {
 foreach (ref var item in items.AsSpan) {
     item.Weight *= 2f;
 }
+
+// Read-only iteration via the enumerator — `CurrentRO` returns `ref readonly`.
+// Suffix `RO` is an explicit opt-in to a snapshot view: the FFSECS0010 analyzer
+// rule (forbidding by-value copies of ref-returning members) intentionally skips it.
+var e = items.GetEnumerator();
+while (e.MoveNext()) {
+    ref readonly var item = ref e.CurrentRO;
+    // read-only consumption — no defensive copy, no mutation
+}
 ```
+
+{: .note }
+`MultiReadOnly<TValue>` (the read-only view of `Multi<T>`) returns elements **by value** from `First()` / `Last()` / `this[int]` — that's by design and the framework suppresses FFSECS0010 internally. If you need `ref readonly` from a `MultiReadOnly`, use its enumerator.
 
 ___
 

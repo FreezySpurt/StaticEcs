@@ -110,7 +110,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (default(TLinkType) is ILinkConfig<TLinkType> cfg) {
                     config = cfg.Config<TWorld>();
                 }
-                RegisterComponentType(config, $"Link<{typeof(TLinkType).Name}>");
+                RegisterComponentType(config, $"Link<{typeof(TLinkType).Name}>", typeof(INonSerializable).IsAssignableFrom(typeof(TLinkType)));
             }
 
             private EntityGID _value;
@@ -255,7 +255,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (default(TLinkType) is ILinksConfig<TLinkType> cfg) {
                     config = cfg.Config<TWorld>();
                 }
-                RegisterComponentType(config, $"Links<{typeof(TLinkType).Name}>");
+                RegisterComponentType(config, $"Links<{typeof(TLinkType).Name}>", typeof(INonSerializable).IsAssignableFrom(typeof(TLinkType)));
             }
 
             internal uint Offset;

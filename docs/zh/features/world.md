@@ -263,6 +263,12 @@ uint capacity = W.CalculateEntitiesCapacity();
 
 // 销毁世界中的所有实体（世界保持初始化状态）
 W.DestroyAllLoadedEntities();
+
+// 安全的注册检查 — 永远不会抛出异常，可在任何世界状态下使用
+// （在调用 Types().X<T>() 之前以及 Destroy() 之后返回 false）
+bool componentRegistered = W.IsComponentTypeRegistered<Position>();
+bool tagRegistered = W.IsTagTypeRegistered<IsPlayer>();
+bool eventRegistered = W.IsEventTypeRegistered<OnDamage>();
 ```
 
 ___

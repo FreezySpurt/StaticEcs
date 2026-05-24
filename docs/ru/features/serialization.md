@@ -194,6 +194,45 @@ W.Types().Event<OnDamage>();
 
 ___
 
+## Исключение типов из сериализации
+
+Реализация маркера `INonSerializable` на типе полностью исключает его данные из **любых** снимков мира (`WorldSnapshot`, `ChunkSnapshot`, `ClusterSnapshot`, `EntitiesSnapshot`). Маркер применим к любому типу, зарегистрированному как компонент, тег, событие, link, multi-link или мульти-компонент.
+
+```csharp
+// Компонент исключён из снимков
+public struct CachedTransform : IComponent, INonSerializable {
+    public Matrix4x4 Value;
+}
+
+// Тег исключён из снимков
+public struct IsHovered : ITag, INonSerializable { }
+
+// Событие исключено из снимков
+public struct OnTick : IEvent, INonSerializable { }
+
+// Link/Links/Multi: маркер ставится на пользовательский link/value тип,
+// а не на Link<T> / Links<T> / Multi<T>
+public struct VolatileTarget : ILinkType, INonSerializable {
+    public void OnAdd<TW>(World<TW>.Entity self, EntityGID value) where TW : struct, IWorldType { }
+    public void OnDelete<TW>(World<TW>.Entity self, EntityGID value, HookReason reason) where TW : struct, IWorldType { }
+    public void CopyTo<TW>(World<TW>.Entity self, World<TW>.Entity other, EntityGID value) where TW : struct, IWorldType { }
+}
+```
+
+Маркер влияет **только на сериализацию**. Всё остальное runtime-поведение — `Add`/`Set`/`Has`/`Query`, lifecycle-хуки (`OnAdd`/`OnDelete`/`CopyTo`), enable/disable, `Destroy`/`Unload`, трекинг изменений, type-erased хэндлы — работает идентично обычному типу. У типа сохраняется `Guid`, `DynamicId`, пул, битмаски и так далее.
+
+Что маркер делает на **записи**:
+- Пул типа пропускается при записи чанков (`WorldSnapshot` / `ChunkSnapshot` / `ClusterSnapshot`) — в поток не попадают ни заголовок пула, ни per-entity компоненты этого типа.
+- События этого типа пропускаются при записи кольцевого буфера событий.
+- В per-entity битмаске, записываемой в `EntitiesSnapshot`, биты для non-serializable пулов не выставляются.
+- Размер итогового снимка уменьшается ровно на объём данных исключённых типов.
+
+Что маркер делает на **чтении**: ничего. Если снимок уже содержит данные для типа, который теперь помечен `INonSerializable`, читатель всё равно восстановит их через стандартный поиск по GUID. Это позволяет загружать старые снимки. Используйте delete-мигратор (см. *Миграция удалённых типов*) только если тип **также** снят с регистрации.
+
+Флаг также доступен в runtime на type-erased хэндлах — `ComponentsHandle.NonSerializable` и `EventsHandle.NonSerializable` зеркалируют `INonSerializable` на зарегистрированном типе. Это удобно для tooling, отладочных дампов и собственных сериализаторов.
+
+___
+
 ## Снимок мира (World Snapshot)
 
 Сохраняет полное состояние мира: все сущности, компоненты, теги, события и состояние отслеживания изменений.

@@ -194,6 +194,45 @@ W.Types().Event<OnDamage>();
 
 ___
 
+## 从序列化中排除类型
+
+在类型上实现标记接口 `INonSerializable` 会将其数据从世界生成的**所有**快照（`WorldSnapshot`、`ChunkSnapshot`、`ClusterSnapshot`、`EntitiesSnapshot`）中完全排除。适用于任何注册为组件、标签、事件、link、multi-link 或多组件的类型。
+
+```csharp
+// 从快照中排除的组件
+public struct CachedTransform : IComponent, INonSerializable {
+    public Matrix4x4 Value;
+}
+
+// 从快照中排除的标签
+public struct IsHovered : ITag, INonSerializable { }
+
+// 从快照中排除的事件
+public struct OnTick : IEvent, INonSerializable { }
+
+// Link/Links/Multi：标记应放在用户的 link/value 类型上，
+// 而不是 Link<T> / Links<T> / Multi<T> 上
+public struct VolatileTarget : ILinkType, INonSerializable {
+    public void OnAdd<TW>(World<TW>.Entity self, EntityGID value) where TW : struct, IWorldType { }
+    public void OnDelete<TW>(World<TW>.Entity self, EntityGID value, HookReason reason) where TW : struct, IWorldType { }
+    public void CopyTo<TW>(World<TW>.Entity self, World<TW>.Entity other, EntityGID value) where TW : struct, IWorldType { }
+}
+```
+
+该标记**只影响序列化**。所有其他运行时行为——`Add`/`Set`/`Has`/`Query`、生命周期钩子（`OnAdd`/`OnDelete`/`CopyTo`）、enable/disable、`Destroy`/`Unload`、变更追踪、type-erased 句柄——与普通类型完全相同。类型仍然拥有 `Guid`、`DynamicId`、池、位图等。
+
+标记在**写入**路径上的作用：
+- 写入 chunk（`WorldSnapshot` / `ChunkSnapshot` / `ClusterSnapshot`）时跳过该类型的池——既不输出 per-pool 头部，也不输出属于该类型的 per-entity 组件。
+- 写入事件环形缓冲区时跳过该类型的事件。
+- 写入 `EntitiesSnapshot` 的 per-entity 组件位图时排除 non-serializable 池对应的位。
+- 生成的快照大小恰好减少属于被排除类型的字节数。
+
+标记在**读取**路径上的作用：无。如果快照中已经包含某个现已标记为 `INonSerializable` 的类型的数据，读取器仍然会通过标准的 GUID 查找恢复这些数据。这样可以加载旧快照。仅当类型**同时**被取消注册时，才使用删除迁移器（参见 *已删除类型的迁移*）。
+
+该标记在运行时也可以通过 type-erased 句柄访问 —— `ComponentsHandle.NonSerializable` 和 `EventsHandle.NonSerializable` 镜像了已注册类型上的 `INonSerializable`。这对自定义工具、调试转储和自定义序列化器很有用。
+
+___
+
 ## 世界快照（World Snapshot）
 
 保存完整的世界状态：所有实体、组件、标签、事件以及变更追踪状态。
