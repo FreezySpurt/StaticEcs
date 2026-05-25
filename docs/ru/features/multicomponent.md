@@ -152,6 +152,11 @@ ref var last = ref items[items.Length - 1];
 ref var f = ref items.First();
 ref var l = ref items.Last();
 
+// Read-only варианты — аксессоры `ref readonly`, без защитных копий
+ref readonly var firstRO = ref items.GetFirst();
+ref readonly var lastRO  = ref items.GetLast();
+ref readonly var itemRO  = ref items.Get(0);
+
 // Span для прямого доступа к памяти
 Span<Item> span = items.AsSpan;
 ReadOnlySpan<Item> roSpan = items.AsReadOnlySpan;
@@ -277,7 +282,19 @@ for (int i = 0; i < items.Length; i++) {
 foreach (ref var item in items.AsSpan) {
     item.Weight *= 2f;
 }
+
+// Read-only итерация через перечислитель — `CurrentRO` возвращает `ref readonly`.
+// Суффикс `RO` — явное согласие на snapshot-вид: правило FFSECS0010 анализатора
+// (запрещающее by-value копии ref-возвращающих членов) намеренно пропускает его.
+var e = items.GetEnumerator();
+while (e.MoveNext()) {
+    ref readonly var item = ref e.CurrentRO;
+    // read-only потребление — без защитной копии и без мутаций
+}
 ```
+
+{: .noteru }
+`MultiReadOnly<TValue>` (read-only представление `Multi<T>`) возвращает элементы **по значению** из `First()` / `Last()` / `this[int]` — это сознательное поведение, и FFSECS0010 во фреймворке внутренне подавлен. Если из `MultiReadOnly` нужен `ref readonly`, используйте его перечислитель.
 
 ___
 

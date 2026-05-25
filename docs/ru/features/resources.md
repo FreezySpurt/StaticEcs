@@ -53,6 +53,7 @@ W.RemoveResource<GameConfig>();
 W.Resource<GameConfig> configHandle;
 bool registered = configHandle.IsRegistered;
 ref var cfg = ref configHandle.Value;
+ref readonly var cfgRO = ref configHandle.ValueRO;     // `ref readonly` аксессор — без копии, без мутаций
 configHandle.Set(new GameConfig { Gravity = 9.81f }); // регистрация / замена через хэндл
 configHandle.Remove();                                 // удаление через хэндл
 ```
@@ -91,6 +92,7 @@ W.RemoveResource("player_config");
 var moonConfig = new W.NamedResource<GameConfig>("moon_config");
 bool registered = moonConfig.IsRegistered;  // всегда выполняет поиск в словаре, не кэшируется
 ref var cfg = ref moonConfig.Value;          // первый вызов ищет в словаре и кэширует; последующие — O(1)
+ref readonly var cfgRO = ref moonConfig.ValueRO; // `ref readonly` аксессор, поведение кэша как у Value
 moonConfig.Set(new GameConfig { Gravity = 1.62f }); // регистрация / замена по привязанному ключу
 moonConfig.Remove();                                // удаление по привязанному ключу (сбрасывает кэш)
 // Кэш автоматически инвалидируется при удалении ресурса или уничтожении мира

@@ -606,6 +606,12 @@ namespace FFS.Libraries.StaticEcs {
         /// </summary>
         public readonly bool IsTag;
 
+        /// <summary>
+        /// When <c>true</c>, data of this component/tag type is excluded from all world snapshot
+        /// serialization. Mirrors <see cref="INonSerializable"/> on the registered type.
+        /// </summary>
+        public readonly bool NonSerializable;
+
         #if NET5_0_OR_GREATER
         [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Component metadata is preserved by the registration path.")]
         #endif
@@ -627,6 +633,7 @@ namespace FFS.Libraries.StaticEcs {
                 instance.Guid,
                 instance.DynamicId,
                 instance.IsTag,
+                instance.NonSerializable,
                 &World<TWorld>.Components<TComponent>._Initialize,
                 &World<TWorld>.Components<TComponent>._Resize,
                 &World<TWorld>.Components<TComponent>._Destroy,
@@ -676,6 +683,7 @@ namespace FFS.Libraries.StaticEcs {
             Guid guid,
             ushort dynamicId,
             bool isTag,
+            bool nonSerializable,
             delegate*<uint, ulong[][], ushort, void> initialize,
             delegate*<uint, ulong[][], void> resize,
             delegate*<void> destroy,
@@ -722,6 +730,7 @@ namespace FFS.Libraries.StaticEcs {
             Guid = guid;
             DynamicId = dynamicId;
             IsTag = isTag;
+            NonSerializable = nonSerializable;
             _initialize = initialize;
             _resize = resize;
             _destroy = destroy;
@@ -1183,6 +1192,12 @@ namespace FFS.Libraries.StaticEcs {
         /// </summary>
         public readonly ushort DynamicId;
 
+        /// <summary>
+        /// When <c>true</c>, events of this type are excluded from all world snapshot serialization.
+        /// Mirrors <see cref="INonSerializable"/> on the registered event type.
+        /// </summary>
+        public readonly bool NonSerializable;
+
         #if NET5_0_OR_GREATER
         [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Event metadata is preserved by the registration path.")]
         #endif
@@ -1193,6 +1208,7 @@ namespace FFS.Libraries.StaticEcs {
                 typeof(TEvent),
                 World<TWorld>.Events<TEvent>.Instance.Guid,
                 World<TWorld>.Events<TEvent>.Instance.Id,
+                World<TWorld>.Events<TEvent>.Instance.NonSerializable,
                 &World<TWorld>.Events<TEvent>._AddRaw,
                 &World<TWorld>.Events<TEvent>._Add,
                 &World<TWorld>.Events<TEvent>._GetRaw,
@@ -1216,6 +1232,7 @@ namespace FFS.Libraries.StaticEcs {
             Type eventType,
             Guid guid,
             ushort dynamicId,
+            bool nonSerializable,
             delegate*<IEvent, bool> addRaw,
             delegate*<bool> add,
             delegate*<int, IEvent> getRaw,
@@ -1235,6 +1252,7 @@ namespace FFS.Libraries.StaticEcs {
             EventType = eventType;
             Guid = guid;
             DynamicId = dynamicId;
+            NonSerializable = nonSerializable;
             _addRaw = addRaw;
             _add = add;
             _getRaw = getRaw;

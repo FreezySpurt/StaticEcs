@@ -53,6 +53,7 @@ W.RemoveResource<GameConfig>();
 W.Resource<GameConfig> configHandle;
 bool registered = configHandle.IsRegistered;
 ref var cfg = ref configHandle.Value;
+ref readonly var cfgRO = ref configHandle.ValueRO;     // `ref readonly` 访问器 — 无拷贝、无变更
 configHandle.Set(new GameConfig { Gravity = 9.81f }); // 通过句柄注册 / 替换
 configHandle.Remove();                                 // 通过句柄移除
 ```
@@ -91,6 +92,7 @@ W.RemoveResource("player_config");
 var moonConfig = new W.NamedResource<GameConfig>("moon_config");
 bool registered = moonConfig.IsRegistered;  // 始终执行字典查找，不使用缓存
 ref var cfg = ref moonConfig.Value;          // 首次调用从字典解析并缓存；后续调用为 O(1)
+ref readonly var cfgRO = ref moonConfig.ValueRO; // `ref readonly` 访问器，与 Value 缓存行为相同
 moonConfig.Set(new GameConfig { Gravity = 1.62f }); // 通过绑定的键注册 / 替换
 moonConfig.Remove();                                // 通过绑定的键移除（同时丢弃缓存）
 // 当资源被移除或世界被销毁时，缓存会自动失效

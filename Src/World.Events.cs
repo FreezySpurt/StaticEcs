@@ -286,7 +286,7 @@ namespace FFS.Libraries.StaticEcs {
                     config = cfg.Config();
                 }
                 
-                Data.Instance.RegisterEventTypeInternal(config);
+                Data.Instance.RegisterEventTypeInternal(config, typeof(INonSerializable).IsAssignableFrom(typeof(T)));
             }
 
             #if ENABLE_IL2CPP
@@ -346,6 +346,7 @@ namespace FFS.Libraries.StaticEcs {
             internal readonly ushort Id;
             internal readonly byte Version;
             internal readonly bool Initialized;
+            internal readonly bool NonSerializable;
             
             private long _sequence;
             private ushort _maxPagesCount;
@@ -360,9 +361,10 @@ namespace FFS.Libraries.StaticEcs {
             #endif
 
             [MethodImpl(AggressiveInlining)]
-            internal Events(ushort id, EventTypeConfig<T> config) {
+            internal Events(ushort id, EventTypeConfig<T> config, bool nonSerializable) {
                 this = default;
                 Id = id;
+                NonSerializable = nonSerializable;
                 _pages = new Page[MAX_PAGES];
                 _freePages = new FreePage[MAX_PAGES];
                 _receiverDatas = new ReceiverData[32];

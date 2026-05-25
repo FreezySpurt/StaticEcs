@@ -263,6 +263,12 @@ uint capacity = W.CalculateEntitiesCapacity();
 
 // Уничтожить все сущности в мире (мир остаётся инициализированным)
 W.DestroyAllLoadedEntities();
+
+// Безопасные проверки регистрации — никогда не бросают исключение,
+// работают в любом состоянии мира (вернут false до Types().X<T>() и после Destroy())
+bool componentRegistered = W.IsComponentTypeRegistered<Position>();
+bool tagRegistered = W.IsTagTypeRegistered<IsPlayer>();
+bool eventRegistered = W.IsEventTypeRegistered<OnDamage>();
 ```
 
 ___

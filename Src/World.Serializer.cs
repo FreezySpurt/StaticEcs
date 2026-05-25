@@ -1405,7 +1405,7 @@ namespace FFS.Libraries.StaticEcs {
 
                 writer.WriteBool(withEntitiesData);
                 writer.WriteUshort(clusterId);
-                writer.WriteUshort((ushort)Data.Instance.GetAllComponentsHandles().Length);
+                writer.WriteUshort(Data.Instance.SerializableComponentsCount());
                 writer.WriteUint(tempChunks.ChunksCount);
                 writer.WriteArrayUnmanaged(tempChunks.Chunks, 0, (int) tempChunks.ChunksCount);
                 for (uint i = 0; i < tempChunks.ChunksCount; i++) {
@@ -1510,7 +1510,7 @@ namespace FFS.Libraries.StaticEcs {
                     Data.Instance.WriteChunk(ref writer, chunkIdx, false);
                 }
                 
-                writer.WriteUshort((ushort)Data.Instance.GetAllComponentsHandles().Length);
+                writer.WriteUshort(Data.Instance.SerializableComponentsCount());
                 Data.Instance.WriteDataChunk(ref writer, chunkIdx, false);
 
                 ReadOnlySpan<uint> chunks = stackalloc uint[1] { chunkIdx };

@@ -23,6 +23,26 @@ using Unity.IL2CPP.CompilerServices;
 
 namespace FFS.Libraries.StaticEcs {
 
+    /// <summary>
+    /// Marker interface that excludes a type from all world snapshot serialization.
+    /// <para>
+    /// Apply to any type implementing <c>IComponent</c>, <c>ITag</c>, <c>IEvent</c>,
+    /// <c>ILinkType</c>, <c>ILinksType</c> or <c>IMultiComponent</c>. Data of such a type
+    /// is never written into <c>WorldSnapshot</c>, <c>ChunkSnapshot</c>, <c>ClusterSnapshot</c>
+    /// or <c>EntitiesSnapshot</c>.
+    /// </para>
+    /// <para>
+    /// Marker affects only serialization. All runtime behavior — Add/Set/Has/Query, lifecycle
+    /// hooks, Destroy/Unload, migrations — works identically to a regular type.
+    /// </para>
+    /// <para>
+    /// On read: if a snapshot already contains data for a type that is now marked
+    /// <see cref="INonSerializable"/>, the reader still restores it via the standard GUID lookup.
+    /// The marker does not block reading historical data.
+    /// </para>
+    /// </summary>
+    public interface INonSerializable { }
+
     internal class StaticEcsException : InvalidOperationException {
         internal StaticEcsException() { }
 

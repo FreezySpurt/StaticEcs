@@ -5,7 +5,7 @@
   <a href="./README_RU.md"><img src="https://img.shields.io/badge/RU-Русский-blue?style=flat-square" alt="Русский"></a>
   <a href="./README_ZH.md"><img src="https://img.shields.io/badge/ZH-中文-blue?style=flat-square" alt="中文"></a>
   <br><br>
-  <img src="https://img.shields.io/badge/version-2.2.4-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.5-blue?style=for-the-badge" alt="Version">
   <a href="https://www.nuget.org/packages/FFS.StaticEcs/"><img src="https://img.shields.io/badge/NuGet-FFS.StaticEcs-004880?style=for-the-badge&logo=nuget" alt="NuGet"></a>
   <a href="https://felid-force-studios.github.io/StaticEcs/en/"><img src="https://img.shields.io/badge/Docs-documentation-blueviolet?style=for-the-badge" alt="Documentation"></a>
   <a href="https://gist.github.com/blackbone/6d254a684cf580441bf58690ad9485c3"><img src="https://img.shields.io/badge/Benchmarks-results-green?style=for-the-badge" alt="Benchmarks"></a>
@@ -62,7 +62,10 @@
   * [Compiler directives](https://felid-force-studios.github.io/StaticEcs/en/features/compilerdirectives.html)
 * [Performance](https://felid-force-studios.github.io/StaticEcs/en/performance.html)
 * [Unity integration](https://felid-force-studios.github.io/StaticEcs/en/unityintegrations.html)
+* [Roslyn analyzer](https://felid-force-studios.github.io/StaticEcs/en/analyzer.html)
 * [AI Agent Integration](#ai-agent-integration)
+* [Roadmap](#roadmap)
+* [Community projects & references](#community-projects--references)
 * [License](#license)
 
 
@@ -99,14 +102,6 @@ The library has a dependency on [StaticPack](https://github.com/Felid-Force-Stud
   dotnet add package FFS.StaticEcs.Debug
   ```
   Packages: [FFS.StaticEcs](https://www.nuget.org/packages/FFS.StaticEcs/) · [FFS.StaticEcs.Debug](https://www.nuget.org/packages/FFS.StaticEcs.Debug/)
-
-# AI Agent Integration
-If you use AI coding assistants (Claude Code, Cursor, Copilot, etc.) with StaticEcs:
-- **llms.txt**: Point your agent at [`https://felid-force-studios.github.io/StaticEcs/llms.txt`](https://felid-force-studios.github.io/StaticEcs/llms.txt) for a concise AI-readable reference
-- **Full context**: [`https://felid-force-studios.github.io/StaticEcs/llms-full.txt`](https://felid-force-studios.github.io/StaticEcs/llms-full.txt) for comprehensive documentation
-- **Claude Code**: Copy the [consumer CLAUDE.md snippet](https://felid-force-studios.github.io/StaticEcs/en/aiagentguide.html) into your project's `CLAUDE.md`
-- **Common pitfalls**: See the [pitfalls guide](https://felid-force-studios.github.io/StaticEcs/en/pitfalls.html)
-
 
 # Concept
 StaticEcs — a new ECS architecture based on an inverted hierarchical bitmap model.
@@ -213,6 +208,36 @@ public class Program {
     }
 }
 ```
+
+# AI Agent Integration
+If you use AI coding assistants (Claude Code, Cursor, Copilot, etc.) with StaticEcs:
+- **llms.txt**: Point your agent at [`https://felid-force-studios.github.io/StaticEcs/llms.txt`](https://felid-force-studios.github.io/StaticEcs/llms.txt) for a concise AI-readable reference
+- **Full context**: [`https://felid-force-studios.github.io/StaticEcs/llms-full.txt`](https://felid-force-studios.github.io/StaticEcs/llms-full.txt) for comprehensive documentation
+- **Claude Code**: Copy the [consumer CLAUDE.md snippet](https://felid-force-studios.github.io/StaticEcs/en/aiagentguide.html) into your project's `CLAUDE.md`
+- **Common pitfalls**: See the [pitfalls guide](https://felid-force-studios.github.io/StaticEcs/en/pitfalls.html)
+
+
+# Roadmap
+StaticEcs is feature-complete for its core scope. Active development focuses on two things:
+- **Extended Unity Burst support** — most of the public API will be made available from Burst-compiled code paths.
+- **Maintenance & stability** — bug fixes, performance refinements, small quality-of-life improvements.
+
+No large new features are planned at this time. If you hit a bug, have a question, or want to suggest an improvement — please [open an issue](https://github.com/Felid-Force-Studios/StaticEcs/issues) or [send a pull request](https://github.com/Felid-Force-Studios/StaticEcs/pulls). Contributions are very welcome.
+
+
+# Community projects & references
+
+<p>
+  <a href="https://github.com/d4nilevi4/StaticTopDownShooter"><img src="https://raw.githubusercontent.com/d4nilevi4/StaticTopDownShooter/main/preview/preview.webp" alt="StaticTopDownShooter" width="320" align="left" hspace="12"></a>
+  <strong><a href="https://github.com/d4nilevi4/StaticTopDownShooter">StaticTopDownShooter</a></strong> by <a href="https://github.com/d4nilevi4">@d4nilevi4</a> — 2D top-down shooter, Unity 6, StaticEcs. Enemies use Utility AI to take cover and return fire.
+  <br clear="left">
+</p>
+
+<p>
+  <a href="https://github.com/d4nilevi4/StaticEngine"><img src="https://raw.githubusercontent.com/d4nilevi4/StaticEngine/main/GravitySimulation/PREVIEW/preview_without_grid.webp" alt="StaticEngine" width="320" align="left" hspace="12"></a>
+  <strong><a href="https://github.com/d4nilevi4/StaticEngine">StaticEngine</a></strong> by <a href="https://github.com/d4nilevi4">@d4nilevi4</a> — experimental C#/.NET 10 game engine inspired by Bevy. Built on StaticEcs + Raylib-cs.
+  <br clear="left">
+</p>
 
 # License
 [MIT license](https://github.com/Felid-Force-Studios/StaticEcs/blob/master/LICENSE.md)

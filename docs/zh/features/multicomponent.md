@@ -152,6 +152,11 @@ ref var last = ref items[items.Length - 1];
 ref var f = ref items.First();
 ref var l = ref items.Last();
 
+// 只读对应版本 — `ref readonly` 访问器，无防御性拷贝
+ref readonly var firstRO = ref items.GetFirst();
+ref readonly var lastRO  = ref items.GetLast();
+ref readonly var itemRO  = ref items.Get(0);
+
 // Span 直接内存访问
 Span<Item> span = items.AsSpan;
 ReadOnlySpan<Item> roSpan = items.AsReadOnlySpan;
@@ -277,7 +282,19 @@ for (int i = 0; i < items.Length; i++) {
 foreach (ref var item in items.AsSpan) {
     item.Weight *= 2f;
 }
+
+// 通过枚举器进行只读迭代 — `CurrentRO` 返回 `ref readonly`。
+// 后缀 `RO` 是对 snapshot 视图的显式同意：FFSECS0010 分析器规则
+// （禁止 ref 返回成员的按值拷贝）会有意跳过它。
+var e = items.GetEnumerator();
+while (e.MoveNext()) {
+    ref readonly var item = ref e.CurrentRO;
+    // 只读消费 — 无防御性拷贝，无变更
+}
 ```
+
+{: .notezh }
+`MultiReadOnly<TValue>`（`Multi<T>` 的只读视图）的 `First()` / `Last()` / `this[int]` **按值**返回元素 — 这是有意为之，框架内部抑制了 FFSECS0010。若需要从 `MultiReadOnly` 获取 `ref readonly`，请使用其枚举器。
 
 ___
 

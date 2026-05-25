@@ -197,6 +197,7 @@ namespace FFS.Libraries.StaticEcs {
             Serializer.DestroySerializer();
 
             Data.Instance.WorldStatus = WorldStatus.NotCreated;
+            Data.Handle = default;
         }
 
         /// <summary>
@@ -1541,7 +1542,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (default(T) is ILinkConfig<T> cfg) {
                     config = cfg.Config<TWorld>();
                 }
-                RegisterComponentType(config, $"Link<{typeof(T).Name}>");
+                RegisterComponentType(config, $"Link<{typeof(T).Name}>", typeof(INonSerializable).IsAssignableFrom(typeof(T)));
                 return this;
             }
 
@@ -1557,7 +1558,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (default(T) is ILinksConfig<T> cfg) {
                     config = cfg.Config<TWorld>();
                 }
-                RegisterComponentType(config, $"Links<{typeof(T).Name}>");
+                RegisterComponentType(config, $"Links<{typeof(T).Name}>", typeof(INonSerializable).IsAssignableFrom(typeof(T)));
                 return this;
             }
 

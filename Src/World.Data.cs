@@ -156,7 +156,7 @@ namespace FFS.Libraries.StaticEcs {
         
         #region TYPE REGISTRATION
         [MethodImpl(AggressiveInlining)]
-        internal static void RegisterComponentType<T>(ComponentTypeConfig<T> config, string typeName)
+        internal static void RegisterComponentType<T>(ComponentTypeConfig<T> config, string typeName, bool? nonSerializable = null)
             where T : struct, IComponent {
             #if FFS_ECS_DEBUG
             AssertWorldIsCreated(WorldTypeName);
@@ -164,7 +164,7 @@ namespace FFS.Libraries.StaticEcs {
             #else
             if (IsComponentTypeRegistered<T>()) return;
             #endif
-            Data.Instance.RegisterComponentOrTagTypeInternal(config, false, typeName);
+            Data.Instance.RegisterComponentOrTagTypeInternal(config, false, nonSerializable ?? typeof(INonSerializable).IsAssignableFrom(typeof(T)), typeName);
         }
 
         /// <summary>
@@ -178,7 +178,7 @@ namespace FFS.Libraries.StaticEcs {
         internal static void RegisterMultiComponentType<T>(ComponentTypeConfig<Multi<T>> config, IPackArrayStrategy<T> elementStrategy, string typeName)
             where T : struct, IMultiComponent {
             Multi<T>.ElementStrategy = elementStrategy ?? AutoRegistration.TryCreateUnmanagedPackArrayStrategy<T>() ?? new StructPackArrayStrategy<T>();
-            RegisterComponentType(config, typeName);
+            RegisterComponentType(config, typeName, typeof(INonSerializable).IsAssignableFrom(typeof(T)));
         }
 
         [MethodImpl(AggressiveInlining)]
@@ -189,7 +189,7 @@ namespace FFS.Libraries.StaticEcs {
             #else
             if (IsTagTypeRegistered<T>()) return;
             #endif
-            Data.Instance.RegisterComponentOrTagTypeInternal(config.AsComponentConfig, true, typeof(T).Name);
+            Data.Instance.RegisterComponentOrTagTypeInternal(config.AsComponentConfig, true, typeof(INonSerializable).IsAssignableFrom(typeof(T)), typeof(T).Name);
         }
 
         [MethodImpl(AggressiveInlining)]
@@ -200,7 +200,7 @@ namespace FFS.Libraries.StaticEcs {
             #else
             if (IsEventTypeRegistered<T>()) return;
             #endif
-            Data.Instance.RegisterEventTypeInternal(config);
+            Data.Instance.RegisterEventTypeInternal(config, typeof(INonSerializable).IsAssignableFrom(typeof(T)));
         }
 
         [MethodImpl(AggressiveInlining)]
@@ -218,14 +218,29 @@ namespace FFS.Libraries.StaticEcs {
             Data.Instance.RegisterEntityTypeInternal<T>();
         }
 
+        /// <summary>
+        /// Safe registration check for a component type. Does not throw and works in any world state
+        /// (returns <c>false</c> before <c>Types().Component&lt;T&gt;()</c> is called and after
+        /// <see cref="Destroy"/>).
+        /// </summary>
         [MethodImpl(AggressiveInlining)]
-        internal static bool IsComponentTypeRegistered<T>() where T : struct, IComponent => Components<T>.Instance.IsRegistered;
+        public static bool IsComponentTypeRegistered<T>() where T : struct, IComponent => Components<T>.IsTypeRegistered;
 
+        /// <summary>
+        /// Safe registration check for a tag type. Does not throw and works in any world state
+        /// (returns <c>false</c> before <c>Types().Tag&lt;T&gt;()</c> is called and after
+        /// <see cref="Destroy"/>).
+        /// </summary>
         [MethodImpl(AggressiveInlining)]
-        internal static bool IsTagTypeRegistered<T>() where T : struct, ITag => Components<T>.Instance.IsRegistered;
+        public static bool IsTagTypeRegistered<T>() where T : struct, ITag => Components<T>.IsTypeRegistered;
 
+        /// <summary>
+        /// Safe registration check for an event type. Does not throw and works in any world state
+        /// (returns <c>false</c> before <c>Types().Event&lt;T&gt;()</c> is called and after
+        /// <see cref="Destroy"/>).
+        /// </summary>
         [MethodImpl(AggressiveInlining)]
-        internal static bool IsEventTypeRegistered<T>() where T : struct, IEvent => Events<T>.Instance.Initialized;
+        public static bool IsEventTypeRegistered<T>() where T : struct, IEvent => Events<T>.Instance.Initialized;
 
         [MethodImpl(AggressiveInlining)]
         internal static bool IsEntityTypeRegistered(byte id) => Data.Instance.EntityTypes[id].Registered;
@@ -276,6 +291,7 @@ namespace FFS.Libraries.StaticEcs {
             private ComponentsHandle[] _poolsComponents;
             private Guid[] _guidsComponents;
             private ushort _poolsCountComponents;
+            private ushort _poolsCountSerializableComponents;
             private ushort[] _trackingComponentIndices;
             private ushort _trackingComponentIndicesCount;
             internal ushort BitMaskComponentsLen;
@@ -414,6 +430,7 @@ namespace FFS.Libraries.StaticEcs {
                 _migratorByGuid = new Dictionary<Guid, EcsComponentDeleteMigrationReader<TWorld>>();
                 BitMaskComponents = null;
                 _poolsCountComponents = default;
+                _poolsCountSerializableComponents = default;
                 BitMaskComponentsLen = default;
 
                 ParallelRunner<TWorld>.Create(worldConfig.ThreadCount.Value, worldConfig.WorkerSpinCount.Value);
@@ -2941,7 +2958,7 @@ namespace FFS.Libraries.StaticEcs {
                     writer.WriteUintAt(offset, count);
                 }
 
-                writer.WriteUshort(_poolsCountComponents);
+                writer.WriteUshort(_poolsCountSerializableComponents);
                 writer.WriteUint(tempChunks.ChunksCount);
                 for (var i = 0; i < tempChunks.ChunksCount; i++) {
                     var chunkIdx = tempChunks.Chunks[i];
@@ -3177,6 +3194,7 @@ namespace FFS.Libraries.StaticEcs {
 
                for (var j = 0; j < _poolsCountComponents; j++) {
                    var pool = _poolsComponents[j];
+                   if (pool.NonSerializable) continue;
                    var guid = pool.Guid;
 
                    writer.WriteGuid(guid);
@@ -3246,6 +3264,7 @@ namespace FFS.Libraries.StaticEcs {
                     while (mask > 0) {
                         var id = Utils.PopLsb(ref mask) + offset;
                         var pool = _poolsComponents[id];
+                        if (pool.NonSerializable) continue;
                         var pos = writer.Position;
                         writer.WriteUshort((ushort)id);
                         if (pool.WriteEntity(ref writer, entity.ID, false)) {
@@ -3472,11 +3491,11 @@ namespace FFS.Libraries.StaticEcs {
             [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Component/tag metadata is preserved by the registration path and DynamicDependency on RegisterAll.")]
             #endif
             [MethodImpl(AggressiveInlining)]
-            internal void RegisterComponentOrTagTypeInternal<T>(ComponentTypeConfig<T> typeConfig, bool isTag, string typeName) where T : struct, IComponentOrTag {
+            internal void RegisterComponentOrTagTypeInternal<T>(ComponentTypeConfig<T> typeConfig, bool isTag, bool nonSerializable, string typeName) where T : struct, IComponentOrTag {
                 typeConfig = isTag
                     ? typeConfig.MergeWith(ComponentTypeConfig<T>.DefaultTag)
                     : typeConfig.MergeWith(ComponentTypeConfig<T>.DefaultComponent);
-                
+
                 #if FFS_ECS_DEBUG
                 AssertNotRegisteredComponent<T>(WorldTypeName);
                 AssertGuidNotEmpty<T>(WorldTypeName, typeConfig.Guid.Value);
@@ -3488,13 +3507,16 @@ namespace FFS.Libraries.StaticEcs {
                 }
 
                 #if FFS_ECS_DEBUG
-                Components<T>.instance = new Components<T>(_poolsCountComponents, typeConfig, isTag, typeName);
+                Components<T>.instance = new Components<T>(_poolsCountComponents, typeConfig, isTag, nonSerializable, typeName);
                 #else
-                Components<T>.Instance = new Components<T>(_poolsCountComponents, typeConfig, isTag, typeName);
+                Components<T>.Instance = new Components<T>(_poolsCountComponents, typeConfig, isTag, nonSerializable, typeName);
                 #endif
                 Components<T>.Handle = ComponentsHandle.Create<TWorld, T>();
                 _poolsComponents[_poolsCountComponents] = Components<T>.Handle;
                 _guidsComponents[_poolsCountComponents++] = typeConfig.Guid!.Value;
+                if (!nonSerializable) {
+                    _poolsCountSerializableComponents++;
+                }
 
                 #if FFS_ECS_DEBUG
                 ref var registeredComponents = ref Components<T>.instance;
@@ -3537,6 +3559,9 @@ namespace FFS.Libraries.StaticEcs {
                 #endif
                 return new ReadOnlySpan<ComponentsHandle>(_poolsComponents, 0, _poolsCountComponents);
             }
+
+            [MethodImpl(AggressiveInlining)]
+            internal readonly ushort SerializableComponentsCount() => _poolsCountSerializableComponents;
 
             [MethodImpl(AggressiveInlining)]
             internal readonly ref ComponentsHandle GetComponentsHandleRef(Type type) {
@@ -3660,7 +3685,7 @@ namespace FFS.Libraries.StaticEcs {
             [UnconditionalSuppressMessage("AOT", "IL2091", Justification = "Event metadata is preserved by the registration path and DynamicDependency on RegisterAll.")]
             #endif
             [MethodImpl(AggressiveInlining)]
-            internal void RegisterEventTypeInternal<T>(EventTypeConfig<T> config) where T : struct, IEvent {
+            internal void RegisterEventTypeInternal<T>(EventTypeConfig<T> config, bool nonSerializable) where T : struct, IEvent {
                 if (Events<T>.Instance.Initialized) throw new StaticEcsException($"Event {typeof(T)} already registered");
 
                 var typeConfig = config.MergeWith(EventTypeConfig<T>.Default);
@@ -3669,7 +3694,7 @@ namespace FFS.Libraries.StaticEcs {
                 AssertGuidNotEmpty<T>(WorldTypeName, typeConfig.Guid.Value);
                 #endif
 
-                Events<T>.Instance = new Events<T>(_poolsCountEvents, typeConfig);
+                Events<T>.Instance = new Events<T>(_poolsCountEvents, typeConfig, nonSerializable);
 
                 if (_poolsCountEvents == _poolsEvents.Length) {
                     Array.Resize(ref _poolsEvents, _poolsCountEvents << 1);
@@ -3698,6 +3723,7 @@ namespace FFS.Libraries.StaticEcs {
                 var point = writer.MakePoint(sizeof(ushort));
                 for (var i = 0; i < _poolsCountEvents; i++) {
                     var pool = _poolsEvents[i];
+                    if (pool.NonSerializable) continue;
                     var guid = pool.Guid;
 
                     if (_poolEventsByGuid.TryGetValue(guid, out var wrapper)) {

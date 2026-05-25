@@ -53,6 +53,7 @@ W.RemoveResource<GameConfig>();
 W.Resource<GameConfig> configHandle;
 bool registered = configHandle.IsRegistered;
 ref var cfg = ref configHandle.Value;
+ref readonly var cfgRO = ref configHandle.ValueRO;     // `ref readonly` accessor — no copy, no mutation
 configHandle.Set(new GameConfig { Gravity = 9.81f }); // register / replace via the handle
 configHandle.Remove();                                 // remove via the handle
 ```
@@ -91,6 +92,7 @@ W.RemoveResource("player_config");
 var moonConfig = new W.NamedResource<GameConfig>("moon_config");
 bool registered = moonConfig.IsRegistered;  // always performs dictionary lookup, not cached
 ref var cfg = ref moonConfig.Value;          // first call resolves from dictionary and caches; subsequent calls are O(1)
+ref readonly var cfgRO = ref moonConfig.ValueRO; // `ref readonly` accessor, same caching behaviour as Value
 moonConfig.Set(new GameConfig { Gravity = 1.62f }); // register / replace under the bound key
 moonConfig.Remove();                                // remove the bound key (also drops the cache)
 // The cache is automatically invalidated when the resource is removed or the world is destroyed
