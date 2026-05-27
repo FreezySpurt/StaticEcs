@@ -10,11 +10,11 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
     /// or overlapping a lambda ref/in parameter, or overlapping an IQuery struct's component generic).
     /// FFSECS0051 — Contradictory All+None on the same component in one filter chain.
     ///
-    /// Entry points (all via Invocation hook):
-    ///   • World&lt;TWorld&gt;.Query&lt;...&gt;(...) — checks duplicates inside the TFilter chain alone.
-    ///   • WorldQuery&lt;TFilter&gt;.Entities() — same.
-    ///   • WorldQuery&lt;TFilter&gt;.For(lambda) — additionally checks filter ↔ lambda param overlap.
-    ///   • WorldQuery&lt;TFilter&gt;.For&lt;TFn&gt;(default/ref fn) — additionally checks filter ↔ TFn IQuery generic.
+    /// Single Invocation hook, dispatched by symbolic match against three sets in <see cref="StaticEcsSymbols"/>:
+    ///   • <see cref="StaticEcsSymbols.QueryEntryMethods"/> — duplicates inside the TFilter chain.
+    ///   • <see cref="StaticEcsSymbols.QueryBuilderForMethods"/> — duplicates plus overlap with lambda
+    ///     parameters and (for the generic For&lt;TFn&gt; overloads) the TFn IQuery struct's component generics.
+    ///   • <see cref="StaticEcsSymbols.QueryBuilderTerminalMethods"/> — duplicates only.
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
     public sealed class QueryFilterRedundancyAnalyzer : DiagnosticAnalyzer {
@@ -27,8 +27,8 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
 
             context.RegisterCompilationStartAction(static start => {
                 if (!StaticEcsCompilationScope.TryEnter(start, out var symbols)) return;
-                if (symbols.WorldQuery is null) return;
                 if (symbols.QueryFilterAll.IsEmpty && symbols.QueryFilterNone.IsEmpty && symbols.QueryFilterAny.IsEmpty) return;
+                if (symbols.QueryEntryMethods.IsEmpty && symbols.QueryBuilderForMethods.IsEmpty && symbols.QueryBuilderTerminalMethods.IsEmpty) return;
 
                 start.RegisterOperationAction(ctx => AnalyzeInvocation(ctx, symbols), OperationKind.Invocation);
             });
@@ -36,49 +36,38 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
 
         private static void AnalyzeInvocation(OperationAnalysisContext context, StaticEcsSymbols symbols) {
             var invocation = (IInvocationOperation)context.Operation;
-            var method = invocation.TargetMethod;
-            if (method is null) return;
+            var target = invocation.TargetMethod.OriginalDefinition;
 
-            switch (method.Name) {
-                case "Query":
-                    AnalyzeQuery(context, invocation, symbols);
-                    break;
-                case "For":
-                    AnalyzeFor(context, invocation, symbols);
-                    break;
-                case "Entities":
-                    AnalyzeEntities(context, invocation, symbols);
-                    break;
+            if (symbols.QueryEntryMethods.Contains(target)) {
+                AnalyzeQuery(context, invocation, symbols);
+            } else if (symbols.QueryBuilderForMethods.Contains(target)) {
+                AnalyzeFor(context, invocation, symbols);
+            } else if (symbols.QueryBuilderTerminalMethods.Contains(target)) {
+                AnalyzeTerminal(context, invocation, symbols);
             }
         }
 
-        // ── Query<...>() ─────────────────────────────────────────────────────────
+        // ── World<TWorld>.Query<...>() ───────────────────────────────────────────
         private static void AnalyzeQuery(OperationAnalysisContext context, IInvocationOperation invocation, StaticEcsSymbols symbols) {
-            var method = invocation.TargetMethod;
-            // Query is a static method on World<TWorld>. Match by containing type's open-generic equality.
-            if (symbols.WorldOpenGeneric is null) return;
-            if (!SymbolEqualityComparer.Default.Equals(method.ContainingType?.OriginalDefinition, symbols.WorldOpenGeneric)) return;
+            var typeArgs = invocation.TargetMethod.TypeArguments;
+            if (typeArgs.Length == 0) return; // Query() — no filter to check.
 
-            var typeArgs = method.TypeArguments;
-            if (typeArgs.Length == 0) return; // Query() no-filter — nothing to check.
-
-            // Skip if chained to another analyzed method (Entities / For / Write / Read / WriteBlock / ReadBlock) —
-            // the outer call will see the same filter set and report once. Prevents double-reporting on
-            // 'W.Query<...>().Entities()' (one diagnostic each from Query and Entities).
-            if (IsChainedToAnalyzedCall(invocation)) return;
+            // Skip if chained to a For/Entities/Write/Read/WriteBlock/ReadBlock call — that outer call
+            // will report on the same filter set, so reporting twice is noise.
+            if (IsChainedToAnalyzedCall(invocation, symbols)) return;
 
             ReportFilterIssues(context, BuildFilterSets(typeArgs, symbols), invocation.Syntax.GetLocation());
         }
 
-        /// <summary>True if <paramref name="invocation"/> is the receiver of an outer call we also analyze.</summary>
-        private static bool IsChainedToAnalyzedCall(IInvocationOperation invocation) {
-            // Walk past implicit conversions / instance-access wrappers up to the outer invocation.
+        private static bool IsChainedToAnalyzedCall(IInvocationOperation invocation, StaticEcsSymbols symbols) {
             var current = invocation.Parent;
             while (current is not null) {
                 switch (current) {
                     case IInvocationOperation outer:
-                        var name = outer.TargetMethod?.Name;
-                        return name is "Entities" or "For" or "Write" or "Read" or "WriteBlock" or "ReadBlock";
+                        var def = outer.TargetMethod.OriginalDefinition;
+                        return symbols.QueryBuilderForMethods.Contains(def)
+                               || symbols.QueryBuilderTerminalMethods.Contains(def)
+                               || symbols.QueryEntryMethods.Contains(def);
                     case IConversionOperation conv when conv.IsImplicit:
                         current = conv.Parent;
                         continue;
@@ -102,7 +91,7 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
 
             // Lambda overlap.
             foreach (var argument in invocation.Arguments) {
-                var lambda = ExtractLambda(argument.Value);
+                var lambda = OperationHelpers.ExtractLambda(argument.Value);
                 if (lambda is null) continue;
                 ReportFilterParamOverlap(context, filterSets, GetLambdaComponentParams(lambda.Symbol, symbols), lambda.Symbol);
             }
@@ -118,8 +107,8 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
             }
         }
 
-        // ── WorldQuery<TFilter>.Entities() ───────────────────────────────────────
-        private static void AnalyzeEntities(OperationAnalysisContext context, IInvocationOperation invocation, StaticEcsSymbols symbols) {
+        // ── *.Entities() / *.Write() / *.Read() / *.WriteBlock() / *.ReadBlock() ─
+        private static void AnalyzeTerminal(OperationAnalysisContext context, IInvocationOperation invocation, StaticEcsSymbols symbols) {
             var filter = ExtractTFilterFromContainingType(invocation.TargetMethod.ContainingType, symbols);
             if (filter is null) return;
 
@@ -269,9 +258,6 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
             return false;
         }
 
-        private static IAnonymousFunctionOperation ExtractLambda(IOperation value) => OperationHelpers.ExtractLambda(value);
-
-        /// <summary>Lambda ref/in component parameters that act as implicit All&lt;T&gt;.</summary>
         private static List<ITypeSymbol> GetLambdaComponentParams(IMethodSymbol lambda, StaticEcsSymbols symbols) {
             var list = new List<ITypeSymbol>();
             foreach (var parameter in lambda.Parameters) {

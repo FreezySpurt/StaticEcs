@@ -42,19 +42,10 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
             category: Categories.Correctness,
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true,
-            description: "ECS marker interfaces (IComponent, ITag, IEvent, ILinkType, ILinksType, IEntityType, IWorldType) are used throughout StaticEcs with 'where T : struct, X' constraints; implementing them via 'class' breaks generic dispatch and reflection-based type registration.");
-
-        public static readonly DiagnosticDescriptor MultiComponentMustBeStruct = new(
-            id: FFSECSIds.FFSECS0021,
-            title: "IMultiComponent must be implemented by a struct",
-            messageFormat: "Type '{0}' implements IMultiComponent and must be declared as 'struct', not 'class'. The multi-component storage uses unmanaged segment layout; class implementations cause undefined behaviour.",
-            category: Categories.Correctness,
-            defaultSeverity: DiagnosticSeverity.Error,
-            isEnabledByDefault: true,
-            description: "Multi-component storage allocates contiguous arrays of T and treats elements by value; a class type would break the layout and lead to runtime corruption.");
+            description: "ECS marker interfaces (IComponent, ITag, IEvent, ILinkType, ILinksType, IEntityType, IWorldType, IMultiComponent) are used throughout StaticEcs with 'where T : struct, X' constraints; implementing them via 'class' breaks generic dispatch and reflection-based type registration. For IMultiComponent specifically a class implementation also breaks the contiguous-segment storage layout.");
 
         public static readonly DiagnosticDescriptor MultiComponentSerializationOverrideRequired = new(
-            id: FFSECSIds.FFSECS0022,
+            id: FFSECSIds.FFSECS0021,
             title: "Non-unmanaged IMultiComponent must override Write/Read",
             messageFormat: "Type '{0}' implements IMultiComponent and is not unmanaged. Both 'Write(ref BinaryPackWriter)' and 'Read(ref BinaryPackReader)' should be overridden.",
             category: Categories.Correctness,

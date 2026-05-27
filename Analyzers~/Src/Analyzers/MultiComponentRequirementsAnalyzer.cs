@@ -4,9 +4,10 @@ using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
     /// <summary>
-    /// FFSECS0022 — struct implementing IMultiComponent that is not unmanaged must override both
+    /// FFSECS0021 — type implementing IMultiComponent that is not unmanaged must override both
     /// Write(ref BinaryPackWriter) and Read(ref BinaryPackReader). Without overrides, serialization
-    /// silently produces empty data for managed payloads.
+    /// silently produces empty data for managed payloads. The struct-vs-class requirement is enforced
+    /// separately by FFSECS0020.
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
     public sealed class MultiComponentRequirementsAnalyzer : DiagnosticAnalyzer {
@@ -31,7 +32,11 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
 
         private static void AnalyzeNamedType(SymbolAnalysisContext context, StaticEcsSymbols symbols) {
             var type = (INamedTypeSymbol)context.Symbol;
-            if (type.TypeKind != TypeKind.Struct) return;
+            // Only concrete struct/class instances can host serialization. Interfaces extending
+            // IMultiComponent and abstract base classes are scaffolding — no storage, no serialization.
+            // Struct-vs-class enforcement itself lives in FFSECS0020.
+            if (type.TypeKind is not (TypeKind.Struct or TypeKind.Class)) return;
+            if (type.IsAbstract) return;
 
             var implementsMulti = false;
             foreach (var iface in type.AllInterfaces) {
