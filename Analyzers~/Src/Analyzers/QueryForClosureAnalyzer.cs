@@ -23,7 +23,7 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
 
             context.RegisterCompilationStartAction(static start => {
                 if (!StaticEcsCompilationScope.TryEnter(start, out var symbols)) return;
-                if (symbols.IQueryFilter is null) return;
+                if (symbols.QueryBuilderForMethods.IsEmpty) return;
 
                 start.RegisterOperationAction(ctx => AnalyzeInvocation(ctx, symbols), OperationKind.Invocation);
             });
@@ -31,8 +31,7 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
 
         private static void AnalyzeInvocation(OperationAnalysisContext context, StaticEcsSymbols symbols) {
             var invocation = (IInvocationOperation)context.Operation;
-            if (invocation.TargetMethod is null || invocation.TargetMethod.Name != "For") return;
-            if (!symbols.IsQueryBuilderType(invocation.TargetMethod.ContainingType)) return;
+            if (!symbols.QueryBuilderForMethods.Contains(invocation.TargetMethod.OriginalDefinition)) return;
 
             foreach (var argument in invocation.Arguments) {
                 var lambda = ExtractLambda(argument.Value);

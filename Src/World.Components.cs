@@ -2301,7 +2301,7 @@ namespace FFS.Libraries.StaticEcs {
                     if (IsTag) {
                         builder.AppendLine(TypeName);
                     } else {
-                        if (HasDisabled(entity)) {
+                        if (HasDisable && HasDisabled(entity)) {
                             builder.Append("[Disabled] ");
                         }
                         builder.Append(TypeName);

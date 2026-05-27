@@ -102,13 +102,13 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
             context.ReportDiagnostic(Diagnostic.Create(result.descriptor, result.location, result.label));
         }
 
-        /// <summary>True if <paramref name="target"/> is a non-ref local/parameter/field reference (the slot we'd copy into).</summary>
+        /// <summary>True if <paramref name="target"/> is a non-ref local/parameter reference (the slot we'd copy into).
+        /// Field/property targets are intentionally excluded: ref-fields are not expressible in ordinary structs/classes,
+        /// and a property setter always copies — both are clearly intentional snapshot writes, not the "forgot ref var" bug.</summary>
         private static bool IsNonRefValueTarget(IOperation target) {
             switch (target) {
                 case ILocalReferenceOperation localRef: return !localRef.Local.IsRef;
                 case IParameterReferenceOperation paramRef: return paramRef.Parameter.RefKind == RefKind.None;
-                case IFieldReferenceOperation: return true;
-                case IPropertyReferenceOperation propRef: return !propRef.Property.ReturnsByRef && !propRef.Property.ReturnsByRefReadonly;
                 default: return false;
             }
         }

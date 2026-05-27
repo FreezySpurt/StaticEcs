@@ -31,7 +31,6 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
         private static void AnalyzeInvocation(OperationAnalysisContext context, StaticEcsSymbols symbols) {
             var invocation = (IInvocationOperation)context.Operation;
             var target = invocation.TargetMethod;
-            if (target is null) return;
             if (!SymbolEqualityComparer.Default.Equals(target.OriginalDefinition, symbols.EntityIsMatch)) return;
             if (target.TypeArguments.Length != 1) return;
 

@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FlowAnalysis;
 using Microsoft.CodeAnalysis.Operations;
@@ -58,13 +60,6 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
             return value as IMethodReferenceOperation;
         }
 
-        /// <summary>
-        /// Tries to build a <see cref="ControlFlowGraph"/> for the given body operation.
-        /// <c>ControlFlowGraph.Create</c> requires a root operation whose Parent is null; this helper
-        /// walks up the tree to find such a root and dispatches to the correct Create overload.
-        /// Returns null for unsupported shapes (e.g. lambdas — Roslyn cannot create a CFG for them
-        /// directly) or if construction throws.
-        /// </summary>
         /// <summary>
         /// Walks the receiver chain of <paramref name="value"/> from outer to inner through field and
         /// property accesses, looking for a StaticEcs ref-returning member (FFSECS0010/0012 allow-list)
@@ -157,6 +152,13 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
             return payload.IsValueType;
         }
 
+        /// <summary>
+        /// Tries to build a <see cref="ControlFlowGraph"/> for the given body operation.
+        /// <c>ControlFlowGraph.Create</c> requires a root operation whose Parent is null; this helper
+        /// walks up the tree to find such a root and dispatches to the correct Create overload.
+        /// Returns null for unsupported shapes (e.g. lambdas — Roslyn cannot create a CFG for them
+        /// directly) or if construction throws.
+        /// </summary>
         public static ControlFlowGraph TryCreateCfg(IOperation body) {
             if (body is null) return null;
             var root = body;
@@ -175,6 +177,94 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
                 }
             } catch {
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// Builds a <see cref="ControlFlowGraph"/> for a lambda body. Roslyn forbids
+        /// <c>ControlFlowGraph.Create(IAnonymousFunctionOperation)</c> directly — instead we build the
+        /// enclosing method/initializer CFG first, locate the corresponding
+        /// <see cref="IFlowAnonymousFunctionOperation"/> by syntax, and ask the parent CFG for the
+        /// lambda's nested CFG. Returns null if the enclosing CFG can't be built or the flow-anon
+        /// can't be located (rare; falls back to syntax-order analysis on caller side).
+        /// </summary>
+        public static ControlFlowGraph TryGetAnonymousFunctionCfg(IAnonymousFunctionOperation lambda) {
+            if (lambda is null) return null;
+            var parentCfg = TryCreateCfg(lambda);
+            if (parentCfg is null) return null;
+            var flowAnon = FindFlowAnonymousFunction(parentCfg, lambda.Syntax);
+            if (flowAnon is null) return null;
+            try {
+                return parentCfg.GetAnonymousFunctionControlFlowGraph(flowAnon);
+            } catch {
+                return null;
+            }
+        }
+
+        private static IFlowAnonymousFunctionOperation FindFlowAnonymousFunction(ControlFlowGraph cfg, SyntaxNode lambdaSyntax) {
+            foreach (var block in cfg.Blocks) {
+                foreach (var op in block.Operations) {
+                    foreach (var descendant in op.DescendantsAndSelf()) {
+                        if (descendant is IFlowAnonymousFunctionOperation flow && ReferenceEquals(flow.Syntax, lambdaSyntax)) {
+                            return flow;
+                        }
+                    }
+                }
+                if (block.BranchValue is not null) {
+                    foreach (var descendant in block.BranchValue.DescendantsAndSelf()) {
+                        if (descendant is IFlowAnonymousFunctionOperation flow && ReferenceEquals(flow.Syntax, lambdaSyntax)) {
+                            return flow;
+                        }
+                    }
+                }
+            }
+            // Lambdas can be nested in regions (e.g. inside a captured `try`); walk LocalFunctions/AnonymousFunctions CFGs too.
+            foreach (var localFnRef in cfg.LocalFunctions) {
+                try {
+                    var nested = cfg.GetLocalFunctionControlFlowGraph(localFnRef);
+                    var found = FindFlowAnonymousFunction(nested, lambdaSyntax);
+                    if (found is not null) return found;
+                } catch { }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Visits the CFG of <paramref name="body"/> and every nested CFG (anonymous functions and local
+        /// functions) exactly once. Each CFG is delivered to <paramref name="visit"/> along with the
+        /// <see cref="IMethodSymbol"/> of its enclosing callable. No-op if the root CFG cannot be built.
+        /// </summary>
+        public static void WalkCfgRecursive(IOperation body, IMethodSymbol owner, Action<ControlFlowGraph, IMethodSymbol> visit) {
+            var cfg = TryCreateCfg(body);
+            if (cfg is not null) WalkCfgRecursive(cfg, owner, visit);
+        }
+
+        /// <summary>
+        /// Same as the body-based overload but accepts an already-built <see cref="ControlFlowGraph"/>.
+        /// Useful when the caller has the top-level CFG and wants to avoid rebuilding it.
+        /// </summary>
+        public static void WalkCfgRecursive(ControlFlowGraph cfg, IMethodSymbol owner, Action<ControlFlowGraph, IMethodSymbol> visit) {
+            visit(cfg, owner);
+            foreach (var anon in EnumerateFlowAnonymousFunctions(cfg)) {
+                ControlFlowGraph nested;
+                try { nested = cfg.GetAnonymousFunctionControlFlowGraph(anon); } catch { continue; }
+                if (nested is not null) WalkCfgRecursive(nested, anon.Symbol, visit);
+            }
+            foreach (var localFn in cfg.LocalFunctions) {
+                ControlFlowGraph nested;
+                try { nested = cfg.GetLocalFunctionControlFlowGraph(localFn); } catch { continue; }
+                if (nested is not null) WalkCfgRecursive(nested, localFn, visit);
+            }
+        }
+
+        private static IEnumerable<IFlowAnonymousFunctionOperation> EnumerateFlowAnonymousFunctions(ControlFlowGraph cfg) {
+            foreach (var block in cfg.Blocks) {
+                foreach (var op in block.Operations)
+                    foreach (var d in op.DescendantsAndSelf())
+                        if (d is IFlowAnonymousFunctionOperation anon) yield return anon;
+                if (block.BranchValue is not null)
+                    foreach (var d in block.BranchValue.DescendantsAndSelf())
+                        if (d is IFlowAnonymousFunctionOperation anon) yield return anon;
             }
         }
     }

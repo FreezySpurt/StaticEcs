@@ -18,12 +18,8 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
             context.EnableConcurrentExecution();
 
             context.RegisterCompilationStartAction(static start => {
-                if (!StaticEcsCompilationScope.TryEnter(start, out var symbols)) {
-                    return;
-                }
-                if (symbols.WorldQuery is null) {
-                    return;
-                }
+                if (!StaticEcsCompilationScope.TryEnter(start, out var symbols)) return;
+                if (symbols.QueryBuilderForMethods.IsEmpty) return;
 
                 start.RegisterOperationAction(ctx => AnalyzeInvocation(ctx, symbols), OperationKind.Invocation);
             });
@@ -31,22 +27,10 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
 
         private static void AnalyzeInvocation(OperationAnalysisContext context, StaticEcsSymbols symbols) {
             var invocation = (IInvocationOperation)context.Operation;
-            var method = invocation.TargetMethod;
-            if (method is null || method.Name != "For") return;
-
-            if (!symbols.IsWithinWorldQuery(method.ContainingType)) {
-                return;
-            }
+            if (!symbols.QueryBuilderForMethods.Contains(invocation.TargetMethod.OriginalDefinition)) return;
 
             foreach (var argument in invocation.Arguments) {
-                IAnonymousFunctionOperation lambda = null;
-                var value = argument.Value;
-                while (value is IDelegateCreationOperation delegateCreation) {
-                    value = delegateCreation.Target;
-                }
-                if (value is IAnonymousFunctionOperation anon) {
-                    lambda = anon;
-                }
+                var lambda = OperationHelpers.ExtractLambda(argument.Value);
                 if (lambda is null) continue;
 
                 foreach (var parameter in lambda.Symbol.Parameters) {

@@ -12,7 +12,6 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
         public const string FFSECS0012 = "FFSECS0012";
         public const string FFSECS0020 = "FFSECS0020";
         public const string FFSECS0021 = "FFSECS0021";
-        public const string FFSECS0022 = "FFSECS0022";
         public const string FFSECS0030 = "FFSECS0030";
         public const string FFSECS0031 = "FFSECS0031";
         public const string FFSECS0032 = "FFSECS0032";

@@ -9,15 +9,20 @@ using Microsoft.CodeAnalysis.Operations;
 
 namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
     /// <summary>
-    /// FFSECS0040 — Use of an entity alias after a call that invalidated the underlying storage.
+    /// FFSECS0040 — Component alias (ref/in parameter, or ref-local backed by entity.Ref/Mut/Add/Read)
+    /// used after the source entity was invalidated.
     ///
-    /// Three entry points share a common CFG-based reachability analysis:
-    ///   • Pattern A: lambda passed to WorldQuery&lt;TFilter&gt;.For(...). Aliases = ref/in lambda parameters.
-    ///   • Pattern B: struct/class implementing any IQuery callback interface. Aliases = ref/in parameters of Invoke.
-    ///   • Pattern C: ref-local within any method body, bound to entity.Ref/Mut/Read/Add(). Aliases = those locals.
+    /// Invalidators:
+    ///   • Full kill — Destroy/MoveTo/Unload — invalidates every alias of the entity.
+    ///   • Per-T kill — Delete&lt;T&gt; — invalidates only aliases of component type T.
     ///
-    /// For each invalidator call (Destroy/MoveTo/Unload — full; Delete&lt;T&gt; — per-type) on the entity source,
-    /// every forward-reachable access to an affected alias produces a diagnostic.
+    /// Two alias sources, with different scopes:
+    ///   • Parameter aliases — `(W.Entity, ref/in T)` signature where the framework guarantees the
+    ///     binding (`WorldQuery.For` lambda, or `Invoke` of an `IQuery` callback struct).
+    ///     We do NOT generalise to arbitrary user methods with that signature: outside the framework
+    ///     the convention is unenforced and reporting would be a false positive.
+    ///   • Ref-local aliases — `ref var x = ref source.Ref&lt;T&gt;()` and the like. Universal across
+    ///     any body (method/lambda/local function), reachable via <see cref="OperationHelpers.WalkCfgRecursive"/>.
     /// </summary>
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
     public sealed class EntityUseAfterInvalidationAnalyzer : DiagnosticAnalyzer {
@@ -32,434 +37,281 @@ namespace FFS.Libraries.StaticEcs.Analyzers.Analyzers {
                 if (!StaticEcsCompilationScope.TryEnter(start, out var symbols)) return;
                 if (symbols.EntityType is null) return;
                 if (symbols.EntityFullInvalidators.IsEmpty && symbols.EntityComponentInvalidators.IsEmpty) return;
-
-                if (symbols.WorldQuery is not null) {
+                start.RegisterOperationBlockAction(ctx => AnalyzeBlocks(ctx, symbols));
+                if (!symbols.QueryBuilderForMethods.IsEmpty) {
                     start.RegisterOperationAction(ctx => AnalyzeForInvocation(ctx, symbols), OperationKind.Invocation);
                 }
-
-                // One block-action handles both Pattern B (Invoke method of IQuery-implementing type)
-                // and Pattern C (ref-locals tracking inside any body).
-                start.RegisterOperationBlockAction(ctx => AnalyzeBlock(ctx, symbols));
             });
         }
 
-        // ============================================================================
-        // Pattern A: Lambda in WorldQuery<TFilter>.For(...)
-        // ============================================================================
+        private readonly struct Alias {
+            public readonly ISymbol AliasSymbol;       // parameter or local
+            public readonly ISymbol Source;            // entity-typed local or parameter
+            public readonly ITypeSymbol ComponentType; // T of ref T / in T / Ref<T>()
+            public Alias(ISymbol alias, ISymbol source, ITypeSymbol type) {
+                AliasSymbol = alias; Source = source; ComponentType = type;
+            }
+        }
+
+        // Top-level body action:
+        //   • Parameter aliases — only if owner is an Invoke implementation of an IQuery callback;
+        //     applied to the top-level CFG (lambda bodies inside are handled by AnalyzeForInvocation).
+        //   • Ref-local aliases — universal Pattern C across every CFG in this block, including
+        //     nested lambdas and local functions.
+        private static void AnalyzeBlocks(OperationBlockAnalysisContext context, StaticEcsSymbols symbols) {
+            var owner = context.OwningSymbol as IMethodSymbol;
+            var isCallback = IsImplementationOfQueryCallback(owner, symbols);
+            foreach (var block in context.OperationBlocks) {
+                var topCfg = OperationHelpers.TryCreateCfg(block);
+                if (topCfg is null) continue;
+                if (isCallback) AnalyzeParameterAliases(topCfg, owner, symbols, context.ReportDiagnostic);
+                OperationHelpers.WalkCfgRecursive(topCfg, owner, (cfg, _) =>
+                    AnalyzeRefLocalAliases(cfg, symbols, context.ReportDiagnostic));
+            }
+        }
+
+        // Lambda passed to a query-builder `For` — framework guarantees the
+        // (entity, ref/in component) parameter convention.
         private static void AnalyzeForInvocation(OperationAnalysisContext context, StaticEcsSymbols symbols) {
             var invocation = (IInvocationOperation)context.Operation;
-            if (invocation.TargetMethod is null || invocation.TargetMethod.Name != "For") return;
-            if (!symbols.IsWithinWorldQuery(invocation.TargetMethod.ContainingType)) return;
-
+            if (!symbols.QueryBuilderForMethods.Contains(invocation.TargetMethod.OriginalDefinition)) return;
             foreach (var argument in invocation.Arguments) {
-                var lambda = ExtractLambda(argument.Value);
+                var lambda = OperationHelpers.ExtractLambda(argument.Value);
                 if (lambda is null) continue;
-                // Lambdas don't expose a usable CFG via ControlFlowGraph.Create (parent != null), so we
-                // pass null and let AnalyzeParameterAliases fall back to syntax-span ordering.
-                AnalyzeParameterAliases(context.ReportDiagnostic, lambda.Symbol, lambda.Body, null, symbols);
+                var lambdaCfg = OperationHelpers.TryGetAnonymousFunctionCfg(lambda);
+                if (lambdaCfg is not null) AnalyzeParameterAliases(lambdaCfg, lambda.Symbol, symbols, context.ReportDiagnostic);
             }
         }
 
-        private static IAnonymousFunctionOperation ExtractLambda(IOperation value) => OperationHelpers.ExtractLambda(value);
-
-        // ============================================================================
-        // OperationBlock entry: routes to Pattern B (IQuery.Invoke) and Pattern C (ref-locals).
-        // ============================================================================
-        private static void AnalyzeBlock(OperationBlockAnalysisContext context, StaticEcsSymbols symbols) {
-            // Pattern B — gate by structure only; AnalyzeParameterAliases scans for the Entity parameter
-            // at any position (no longer assumes index 0).
-            if (!symbols.QueryCallbackInterfaces.IsEmpty
-                && context.OwningSymbol is IMethodSymbol method
-                && method.Name == "Invoke"
-                && method.ContainingType is { } owner
-                && (owner.TypeKind == TypeKind.Struct || owner.TypeKind == TypeKind.Class)
-                && owner.AllInterfaces.Any(i => symbols.QueryCallbackInterfaces.Contains(i.OriginalDefinition))
-                && method.Parameters.Length >= 2) {
-                foreach (var block in context.OperationBlocks) {
-                    AnalyzeParameterAliases(context.ReportDiagnostic, method, block, TryCreateCfg(block), symbols);
+        private static bool IsImplementationOfQueryCallback(IMethodSymbol owner, StaticEcsSymbols symbols) {
+            if (owner is null || symbols.QueryCallbackInterfaces.IsEmpty) return false;
+            var containing = owner.ContainingType;
+            if (containing is null) return false;
+            foreach (var iface in containing.AllInterfaces) {
+                if (!symbols.QueryCallbackInterfaces.Contains(iface.OriginalDefinition)) continue;
+                foreach (var contractMember in iface.GetMembers().OfType<IMethodSymbol>()) {
+                    var impl = containing.FindImplementationForInterfaceMember(contractMember);
+                    if (SymbolEqualityComparer.Default.Equals(impl, owner)) return true;
                 }
             }
+            return false;
+        }
 
-            // Pattern C
+        private static void AnalyzeParameterAliases(ControlFlowGraph cfg, IMethodSymbol owner, StaticEcsSymbols symbols, Action<Diagnostic> report) {
+            var aliases = new List<Alias>();
+            CollectParameterAliases(owner, symbols, aliases);
+            if (aliases.Count == 0) return;
+            foreach (var alias in aliases) RunDataflow(cfg, alias, symbols, report);
+        }
+
+        private static void AnalyzeRefLocalAliases(ControlFlowGraph cfg, StaticEcsSymbols symbols, Action<Diagnostic> report) {
+            var aliases = new List<Alias>();
+            CollectRefLocalAliases(cfg, symbols, aliases);
+            if (aliases.Count == 0) return;
+            foreach (var alias in aliases) RunDataflow(cfg, alias, symbols, report);
+        }
+
+        private static void CollectParameterAliases(IMethodSymbol owner, StaticEcsSymbols symbols, List<Alias> aliases) {
+            if (owner is null || owner.Parameters.Length < 2) return;
+            IParameterSymbol entity = null;
+            foreach (var p in owner.Parameters) {
+                if (SymbolEqualityComparer.Default.Equals(p.Type.OriginalDefinition, symbols.EntityType)) {
+                    entity = p;
+                    break;
+                }
+            }
+            if (entity is null) return;
+            foreach (var p in owner.Parameters) {
+                if (ReferenceEquals(p, entity)) continue;
+                if (p.RefKind == RefKind.None) continue;
+                aliases.Add(new Alias(p, entity, p.Type));
+            }
+        }
+
+        // CFG lowers `ref var x = ref source.Ref<T>()` to ISimpleAssignmentOperation(IsRef=true,
+        // Target=local, Value=invocation). Register the (local → source, T) tuple once; rebinds
+        // within the body are treated as kills by the dataflow.
+        private static void CollectRefLocalAliases(ControlFlowGraph cfg, StaticEcsSymbols symbols, List<Alias> aliases) {
             if (symbols.RefReturningTargets.IsEmpty && symbols.RefReadonlyReadTargets.IsEmpty) return;
-            AnalyzeBlockForLocalAliases(context, symbols);
-        }
+            var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+            foreach (var block in cfg.Blocks) {
+                foreach (var op in block.Operations) Scan(op);
+                if (block.BranchValue != null) Scan(block.BranchValue);
+            }
 
-        // ============================================================================
-        // Pattern C: Ref-locals in any method body backed by entity ref-returning members
-        // ============================================================================
-        private static void AnalyzeBlockForLocalAliases(OperationBlockAnalysisContext context, StaticEcsSymbols symbols) {
-            // alias-local → entity-source-local (same-local policy: only direct ILocalReferenceOperation receivers)
-            Dictionary<ILocalSymbol, ILocalSymbol> aliasToSource = null;
-            foreach (var block in context.OperationBlocks) {
-                foreach (var operation in block.DescendantsAndSelf()) {
-                    if (operation is not IVariableDeclaratorOperation declarator) continue;
-                    if (!declarator.Symbol.IsRef) continue;
-                    var init = declarator.Initializer?.Value;
-                    if (init is null) continue;
-                    var unwrapped = UnwrapImplicitConversions(init);
-                    if (unwrapped is not IInvocationOperation invocation) continue;
-                    var target = invocation.TargetMethod?.OriginalDefinition;
-                    if (target is null) continue;
+            void Scan(IOperation root) {
+                foreach (var d in root.DescendantsAndSelf()) {
+                    if (d is not ISimpleAssignmentOperation a || !a.IsRef) continue;
+                    if (a.Target is not ILocalReferenceOperation aliasRef) continue;
+                    var value = OperationHelpers.UnwrapImplicitConversions(a.Value);
+                    if (value is not IInvocationOperation inv) continue;
+                    var target = inv.TargetMethod.OriginalDefinition;
                     if (!symbols.RefReturningTargets.Contains(target) && !symbols.RefReadonlyReadTargets.Contains(target)) continue;
-                    var receiver = invocation.Instance is null ? null : UnwrapImplicitConversions(invocation.Instance);
-                    if (receiver is not ILocalReferenceOperation receiverLocal) continue;
-                    if (!IsEntityType(receiverLocal.Local.Type, symbols)) continue;
-                    aliasToSource ??= new Dictionary<ILocalSymbol, ILocalSymbol>(SymbolEqualityComparer.Default);
-                    aliasToSource[declarator.Symbol] = receiverLocal.Local;
-                }
-            }
-            if (aliasToSource is null) return;
-
-            foreach (var block in context.OperationBlocks) {
-                var cfg = TryCreateCfg(block);
-                if (cfg is null) continue;
-                AnalyzeCfgForLocalAliases(context.ReportDiagnostic, block, cfg, aliasToSource, symbols);
-            }
-        }
-
-        // ============================================================================
-        // Core helper used by Pattern A and B: parameter-alias analysis
-        // ============================================================================
-        private static void AnalyzeParameterAliases(Action<Diagnostic> report, IMethodSymbol methodSymbol, IOperation body, ControlFlowGraph cfg, StaticEcsSymbols symbols) {
-            if (body is null) return;
-            if (methodSymbol.Parameters.Length < 2) return;
-
-            // Scan all parameters: the first Entity-typed parameter (at ANY position) is the receiver
-            // for invalidator calls; ref/in component parameters (everything else with non-None RefKind)
-            // are the aliases.
-            IParameterSymbol entityParam = null;
-            var aliases = new List<IParameterSymbol>();
-            foreach (var parameter in methodSymbol.Parameters) {
-                if (entityParam is null && IsEntityType(parameter.Type, symbols)) {
-                    entityParam = parameter;
-                    continue;
-                }
-                if (parameter.RefKind != RefKind.None) aliases.Add(parameter);
-            }
-            if (entityParam is null || aliases.Count == 0) return;
-
-            if (cfg is not null) {
-                AnalyzeCfgForParameterAliases(report, body, cfg, entityParam, aliases, symbols);
-            } else {
-                AnalyzeSyntaxOrderForParameterAliases(report, body, entityParam, aliases, symbols);
-            }
-        }
-
-        /// <summary>
-        /// Fallback for contexts where ControlFlowGraph.Create is unavailable (lambdas). Uses a
-        /// flow-insensitive syntactic order check: if an alias reference appears AFTER an invalidator
-        /// in source order, flag it. Misses some patterns (e.g. branches), but covers the common
-        /// "destroy → use in same block" case.
-        /// </summary>
-        private static void AnalyzeSyntaxOrderForParameterAliases(Action<Diagnostic> report, IOperation body, IParameterSymbol entityParam, List<IParameterSymbol> aliases, StaticEcsSymbols symbols) {
-            foreach (var invalidator in EnumerateInvalidatorsOnParameter(body, entityParam, symbols)) {
-                var affected = invalidator.fullKill
-                    ? aliases
-                    : FilterAliasesByType(aliases, invalidator.targetType);
-                if (affected.Count == 0) continue;
-
-                var invalidatorEnd = invalidator.invocation.Syntax.Span.End;
-                foreach (var descendant in body.DescendantsAndSelf()) {
-                    if (descendant is not IParameterReferenceOperation paramRef) continue;
-                    if (descendant.Syntax.SpanStart < invalidatorEnd) continue;
-                    if (!ContainsParameter(affected, paramRef.Parameter)) continue;
-                    report(Diagnostic.Create(
-                        Diagnostics.EntityUseAfterInvalidation,
-                        paramRef.Syntax.GetLocation(),
-                        paramRef.Parameter.Name,
-                        invalidator.invocation.TargetMethod?.Name ?? "<invalidator>"));
+                    if (!TryGetEntitySource(inv.Instance, symbols, out var source)) continue;
+                    if (!seen.Add(aliasRef.Local)) continue;
+                    var componentType = inv.TargetMethod.TypeArguments.Length > 0 ? inv.TargetMethod.TypeArguments[0] : null;
+                    aliases.Add(new Alias(aliasRef.Local, source, componentType));
                 }
             }
         }
 
-        private static void AnalyzeCfgForParameterAliases(Action<Diagnostic> report, IOperation body, ControlFlowGraph cfg, IParameterSymbol entityParam, List<IParameterSymbol> aliases, StaticEcsSymbols symbols) {
-            foreach (var invalidator in EnumerateInvalidatorsOnParameter(body, entityParam, symbols)) {
-                var affected = invalidator.fullKill
-                    ? aliases
-                    : FilterAliasesByType(aliases, invalidator.targetType);
-                if (affected.Count == 0) continue;
-
-                foreach (var reachable in EnumerateForwardReachable(cfg, invalidator.invocation)) {
-                    if (reachable is not IParameterReferenceOperation paramRef) continue;
-                    if (!ContainsParameter(affected, paramRef.Parameter)) continue;
-                    report(Diagnostic.Create(
-                        Diagnostics.EntityUseAfterInvalidation,
-                        paramRef.Syntax.GetLocation(),
-                        paramRef.Parameter.Name,
-                        invalidator.invocation.TargetMethod?.Name ?? "<invalidator>"));
-                }
-            }
-        }
-
-        /// <summary>
-        /// Per-alias gen/kill dataflow over the CFG. Mirrors the structure of FFSECS0041
-        /// (<see cref="EntityHandleUseAfterInvalidationAnalyzer"/>):
-        ///   • gen: an invalidator call whose receiver is the alias's source local and whose kill kind
-        ///     (full or per-T) affects this alias's component type.
-        ///   • kill: the alias's own <see cref="IVariableDeclaratorOperation"/> re-executing — for ref-locals,
-        ///     this is the rebinding that clears any prior taint (in a foreach body the declarator runs
-        ///     once per iteration, killing taint from the previous iteration's invalidator).
-        ///   • merge: union (taint at block-entry if any predecessor exited tainted).
-        /// One pass per alias keeps state simple; multi-alias cases are rare in practice.
-        /// </summary>
-        private static void AnalyzeCfgForLocalAliases(Action<Diagnostic> report, IOperation body, ControlFlowGraph cfg, Dictionary<ILocalSymbol, ILocalSymbol> aliasToSource, StaticEcsSymbols symbols) {
-            foreach (var pair in aliasToSource) {
-                RunDataflowForAlias(report, cfg, pair.Key, pair.Value, symbols);
-            }
-        }
-
-        private readonly struct AliasTaintState {
-            public readonly bool Tainted;
-            public readonly string InvalidatorName;
-            public AliasTaintState(bool tainted, string invalidatorName) { Tainted = tainted; InvalidatorName = invalidatorName; }
-            public static readonly AliasTaintState Clean = new AliasTaintState(false, null);
-        }
-
-        private static void RunDataflowForAlias(Action<Diagnostic> report, ControlFlowGraph cfg, ILocalSymbol alias, ILocalSymbol source, StaticEcsSymbols symbols) {
-            var aliasComponentType = alias.Type?.OriginalDefinition;
-            var entry = new AliasTaintState[cfg.Blocks.Length];
-            var visited = new bool[cfg.Blocks.Length];
-            var inWorklist = new bool[cfg.Blocks.Length];
-            var worklist = new Queue<BasicBlock>();
-            worklist.Enqueue(cfg.Blocks[0]);
-            inWorklist[0] = true;
-            visited[0] = true;
+        // Forward worklist dataflow per alias.
+        //   Gen:   invalidator on alias.Source affecting alias.ComponentType (full or per-T match).
+        //   Kill:  `ref alias = ref ...` re-binding (only ref-locals can be rebound; parameter aliases cannot).
+        //   Merge: union.
+        // Within one top-op kill wins over gen.
+        private static void RunDataflow(ControlFlowGraph cfg, Alias alias, StaticEcsSymbols symbols, Action<Diagnostic> report) {
+            int n = cfg.Blocks.Length;
+            var entryTainted = new bool[n];
+            var entryInvalidator = new string[n];
+            var ever = new bool[n];
+            var queued = new bool[n];
             var reported = new HashSet<Location>();
+            var work = new Queue<int>();
 
-            while (worklist.Count > 0) {
-                var block = worklist.Dequeue();
-                inWorklist[block.Ordinal] = false;
-                var exitState = ProcessAliasBlock(block, alias, source, aliasComponentType, entry[block.Ordinal], symbols, report, reported);
-                EnqueueAliasSuccessor(block.FallThroughSuccessor?.Destination, exitState, entry, visited, inWorklist, worklist);
-                EnqueueAliasSuccessor(block.ConditionalSuccessor?.Destination, exitState, entry, visited, inWorklist, worklist);
+            work.Enqueue(0);
+            queued[0] = true;
+            ever[0] = true;
+
+            while (work.Count > 0) {
+                int idx = work.Dequeue();
+                queued[idx] = false;
+                var block = cfg.Blocks[idx];
+
+                bool tainted = entryTainted[idx];
+                string invalidator = entryInvalidator[idx];
+
+                foreach (var op in block.Operations)
+                    ProcessOp(op, alias, ref tainted, ref invalidator, symbols, report, reported);
+                if (block.BranchValue != null)
+                    ProcessOp(block.BranchValue, alias, ref tainted, ref invalidator, symbols, report, reported);
+
+                Propagate(block.FallThroughSuccessor?.Destination, tainted, invalidator, entryTainted, entryInvalidator, ever, queued, work);
+                Propagate(block.ConditionalSuccessor?.Destination, tainted, invalidator, entryTainted, entryInvalidator, ever, queued, work);
             }
         }
 
-        private static void EnqueueAliasSuccessor(BasicBlock successor, AliasTaintState predExit, AliasTaintState[] entry, bool[] visited, bool[] inWorklist, Queue<BasicBlock> worklist) {
+        private static void Propagate(BasicBlock successor, bool exitTainted, string exitInvalidator,
+                                      bool[] entryTainted, string[] entryInvalidator, bool[] ever, bool[] queued, Queue<int> work) {
             if (successor is null) return;
-            var ordinal = successor.Ordinal;
-            var stateChanged = predExit.Tainted && !entry[ordinal].Tainted;
-            if (stateChanged) entry[ordinal] = predExit;
-            if (!visited[ordinal]) {
-                visited[ordinal] = true;
-            } else if (!stateChanged) {
-                return;
+            int idx = successor.Ordinal;
+            bool changed = exitTainted && !entryTainted[idx];
+            if (changed) {
+                entryTainted[idx] = true;
+                entryInvalidator[idx] = exitInvalidator;
             }
-            if (!inWorklist[ordinal]) {
-                inWorklist[ordinal] = true;
-                worklist.Enqueue(successor);
+            if (!ever[idx]) ever[idx] = true;
+            else if (!changed) return;
+            if (!queued[idx]) {
+                queued[idx] = true;
+                work.Enqueue(idx);
             }
         }
 
-        private static AliasTaintState ProcessAliasBlock(BasicBlock block, ILocalSymbol alias, ILocalSymbol source, ITypeSymbol aliasComponentType, AliasTaintState state, StaticEcsSymbols symbols, Action<Diagnostic> report, HashSet<Location> reported) {
-            foreach (var topOp in block.Operations) {
-                state = ProcessAliasTopOperation(topOp, alias, source, aliasComponentType, state, symbols, report, reported);
-            }
-            if (block.BranchValue is not null) {
-                state = ProcessAliasTopOperation(block.BranchValue, alias, source, aliasComponentType, state, symbols, report, reported);
-            }
-            return state;
-        }
+        private static void ProcessOp(IOperation op, Alias alias, ref bool tainted, ref string invalidator,
+                                      StaticEcsSymbols symbols, Action<Diagnostic> report, HashSet<Location> reported) {
+            bool gen = false;
+            string genName = null;
+            bool kill = false;
 
-        private static AliasTaintState ProcessAliasTopOperation(IOperation topOp, ILocalSymbol alias, ILocalSymbol source, ITypeSymbol aliasComponentType, AliasTaintState stateAtStart, StaticEcsSymbols symbols, Action<Diagnostic> report, HashSet<Location> reported) {
-            var hasInvalidator = false;
-            string invalidatorName = null;
-            var hasKill = false;
-
-            foreach (var descendant in topOp.DescendantsAndSelf()) {
-                if (descendant is IInvocationOperation inv
-                    && TryClassifyInvalidator(inv, symbols, out var fullKill, out var targetType)
-                    && IsInvocationOnLocal(inv, source)
-                    && AffectsAlias(fullKill, targetType, aliasComponentType)) {
-                    hasInvalidator = true;
-                    invalidatorName ??= inv.TargetMethod?.Name;
+            foreach (var d in op.DescendantsAndSelf()) {
+                if (d is IInvocationOperation inv
+                    && TryClassifyInvalidator(inv, symbols, out var full, out var killType)
+                    && IsInvocationOnSource(inv, alias.Source)
+                    && Affects(full, killType, alias.ComponentType)) {
+                    gen = true;
+                    genName = inv.TargetMethod.Name;
                 }
-                // Roslyn's CFG lowers `ref var x = ref expr` into `ISimpleAssignmentOperation(IsRef=true,
-                // Target=ILocalReferenceOperation(x), Value=expr)`. The source-form IVariableDeclaratorOperation
-                // is not present in CFG blocks, so we match the lowered shape directly. IsRef=true distinguishes
-                // a re-binding (kill) from a write-through-the-ref (`x = value`), which is a USE of the alias.
-                if (descendant is ISimpleAssignmentOperation assignment
-                    && assignment.IsRef
-                    && assignment.Target is ILocalReferenceOperation targetRef
-                    && SymbolEqualityComparer.Default.Equals(targetRef.Local, alias)) {
-                    hasKill = true;
+                if (IsRebinding(d, alias.AliasSymbol)) {
+                    kill = true;
                 }
             }
 
-            if (stateAtStart.Tainted) {
-                foreach (var descendant in topOp.DescendantsAndSelf()) {
-                    if (descendant is not ILocalReferenceOperation localRef) continue;
-                    if (!SymbolEqualityComparer.Default.Equals(localRef.Local, alias)) continue;
-                    // Don't flag the LHS of the kill-assignment itself — that reference IS the rebind,
-                    // not a use of the stale alias. (Mirrors FFSECS0041's IsKillAssignmentLhs.)
-                    if (descendant.Parent is ISimpleAssignmentOperation parentAssignment
-                        && parentAssignment.IsRef
-                        && ReferenceEquals(parentAssignment.Target, descendant)) continue;
-                    var location = descendant.Syntax.GetLocation();
-                    if (!reported.Add(location)) continue;
-                    report(Diagnostic.Create(
-                        Diagnostics.EntityUseAfterInvalidation,
-                        location,
-                        alias.Name,
-                        stateAtStart.InvalidatorName ?? "<invalidator>"));
+            if (tainted) {
+                foreach (var d in op.DescendantsAndSelf()) {
+                    if (!IsRefToAlias(d, alias.AliasSymbol)) continue;
+                    if (IsRebindLhs(d, alias.AliasSymbol)) continue;
+                    var loc = d.Syntax.GetLocation();
+                    if (!reported.Add(loc)) continue;
+                    report(Diagnostic.Create(Diagnostics.EntityUseAfterInvalidation, loc, alias.AliasSymbol.Name, invalidator));
                 }
             }
 
-            // Kill wins over gen within the same top-op (matches FFSECS0041 semantics).
-            if (hasKill) return AliasTaintState.Clean;
-            if (hasInvalidator) return new AliasTaintState(true, invalidatorName);
-            return stateAtStart;
-        }
-
-        private static bool IsInvocationOnLocal(IInvocationOperation invocation, ILocalSymbol source) {
-            if (invocation.Instance is null) return false;
-            var receiver = UnwrapImplicitConversions(invocation.Instance);
-            return receiver is ILocalReferenceOperation localRef
-                   && SymbolEqualityComparer.Default.Equals(localRef.Local, source);
-        }
-
-        private static bool AffectsAlias(bool fullKill, ITypeSymbol targetType, ITypeSymbol aliasComponentType) {
-            if (fullKill) return true;
-            if (targetType is null || aliasComponentType is null) return false;
-            return SymbolEqualityComparer.Default.Equals(targetType.OriginalDefinition, aliasComponentType);
-        }
-
-        // ============================================================================
-        // CFG construction — handles every IOperation kind that has a Create overload.
-        // ============================================================================
-        private static ControlFlowGraph TryCreateCfg(IOperation body) => OperationHelpers.TryCreateCfg(body);
-
-        // ============================================================================
-        // Invalidator discovery
-        // ============================================================================
-        private readonly struct InvalidatorOnParameter {
-            public readonly IInvocationOperation invocation;
-            public readonly bool fullKill;
-            public readonly ITypeSymbol targetType;
-            public InvalidatorOnParameter(IInvocationOperation invocation, bool fullKill, ITypeSymbol targetType) {
-                this.invocation = invocation; this.fullKill = fullKill; this.targetType = targetType;
+            if (kill) {
+                tainted = false;
+                invalidator = null;
+            } else if (gen) {
+                tainted = true;
+                invalidator = genName;
             }
         }
 
-        // Walks the ORIGINAL operation tree (not CFG-lowered) so receivers stay as IParameterReferenceOperation/
-        // ILocalReferenceOperation. CFG lowers some local references into IFlowCaptureReferenceOperation, which
-        // would otherwise prevent us from matching the receiver.
-        private static IEnumerable<InvalidatorOnParameter> EnumerateInvalidatorsOnParameter(IOperation body, IParameterSymbol entityParam, StaticEcsSymbols symbols) {
-            if (body is null) yield break;
-            foreach (var descendant in body.DescendantsAndSelf()) {
-                if (descendant is not IInvocationOperation invocation) continue;
-                if (!TryClassifyInvalidator(invocation, symbols, out var fullKill, out var targetType)) continue;
-                var receiver = invocation.Instance is null ? null : UnwrapImplicitConversions(invocation.Instance);
-                if (receiver is not IParameterReferenceOperation paramRef) continue;
-                if (!SymbolEqualityComparer.Default.Equals(paramRef.Parameter, entityParam)) continue;
-                yield return new InvalidatorOnParameter(invocation, fullKill, targetType);
-            }
-        }
-
-        private static bool TryClassifyInvalidator(IInvocationOperation invocation, StaticEcsSymbols symbols, out bool fullKill, out ITypeSymbol targetType) {
+        private static bool TryClassifyInvalidator(IInvocationOperation inv, StaticEcsSymbols symbols, out bool fullKill, out ITypeSymbol killType) {
             fullKill = false;
-            targetType = null;
-            var target = invocation.TargetMethod?.OriginalDefinition;
-            if (target is null) return false;
+            killType = null;
+            var target = inv.TargetMethod.OriginalDefinition;
             if (symbols.EntityFullInvalidators.Contains(target)) {
                 fullKill = true;
                 return true;
             }
-            if (symbols.EntityComponentInvalidators.Contains(target)) {
-                if (invocation.TargetMethod.TypeArguments.Length >= 1) {
-                    targetType = invocation.TargetMethod.TypeArguments[0];
-                    return true;
-                }
+            if (symbols.EntityComponentInvalidators.Contains(target) && inv.TargetMethod.TypeArguments.Length > 0) {
+                killType = inv.TargetMethod.TypeArguments[0];
+                return true;
             }
             return false;
         }
 
-        // ============================================================================
-        // Forward-reachability over the CFG starting from an invalidator invocation
-        // ============================================================================
-        private static IEnumerable<IOperation> EnumerateForwardReachable(ControlFlowGraph cfg, IInvocationOperation invalidator) {
-            BasicBlock startBlock = null;
-            var startOperationIndex = -1;
+        private static bool Affects(bool fullKill, ITypeSymbol killType, ITypeSymbol componentType) {
+            if (fullKill) return true;
+            if (killType is null || componentType is null) return false;
+            return SymbolEqualityComparer.Default.Equals(killType.OriginalDefinition, componentType.OriginalDefinition);
+        }
 
-            foreach (var block in cfg.Blocks) {
-                for (var opIdx = 0; opIdx < block.Operations.Length; opIdx++) {
-                    if (block.Operations[opIdx].DescendantsAndSelf().Any(d => ReferenceEquals(d, invalidator) || d.Syntax == invalidator.Syntax)) {
-                        startBlock = block;
-                        startOperationIndex = opIdx;
-                        break;
-                    }
-                }
-                if (startBlock is not null) break;
-            }
-            if (startBlock is null) yield break;
-
-            for (var i = startOperationIndex + 1; i < startBlock.Operations.Length; i++) {
-                foreach (var descendant in startBlock.Operations[i].DescendantsAndSelf()) {
-                    yield return descendant;
-                }
-            }
-            if (startBlock.BranchValue is not null) {
-                foreach (var descendant in startBlock.BranchValue.DescendantsAndSelf()) {
-                    yield return descendant;
-                }
-            }
-
-            var visited = new HashSet<BasicBlock> { startBlock };
-            var queue = new Queue<BasicBlock>();
-            EnqueueSuccessors(startBlock, queue, visited);
-
-            while (queue.Count > 0) {
-                var block = queue.Dequeue();
-                foreach (var op in block.Operations) {
-                    foreach (var descendant in op.DescendantsAndSelf()) {
-                        yield return descendant;
-                    }
-                }
-                if (block.BranchValue is not null) {
-                    foreach (var descendant in block.BranchValue.DescendantsAndSelf()) {
-                        yield return descendant;
-                    }
-                }
-                EnqueueSuccessors(block, queue, visited);
+        private static bool IsInvocationOnSource(IInvocationOperation inv, ISymbol source) {
+            if (inv.Instance is null) return false;
+            var receiver = OperationHelpers.UnwrapImplicitConversions(inv.Instance);
+            switch (receiver) {
+                case ILocalReferenceOperation l: return SymbolEqualityComparer.Default.Equals(l.Local, source);
+                case IParameterReferenceOperation p: return SymbolEqualityComparer.Default.Equals(p.Parameter, source);
+                default: return false;
             }
         }
 
-        private static void EnqueueSuccessors(BasicBlock block, Queue<BasicBlock> queue, HashSet<BasicBlock> visited) {
-            EnqueueIfNew(block.FallThroughSuccessor?.Destination, queue, visited);
-            EnqueueIfNew(block.ConditionalSuccessor?.Destination, queue, visited);
-        }
-
-        private static void EnqueueIfNew(BasicBlock block, Queue<BasicBlock> queue, HashSet<BasicBlock> visited) {
-            if (block is null) return;
-            if (visited.Add(block)) queue.Enqueue(block);
-        }
-
-        // ============================================================================
-        // Utilities
-        // ============================================================================
-        private static IOperation UnwrapImplicitConversions(IOperation value) => OperationHelpers.UnwrapImplicitConversions(value);
-
-        private static bool IsEntityType(ITypeSymbol type, StaticEcsSymbols symbols) {
-            if (type is null || symbols.EntityType is null) return false;
-            return SymbolEqualityComparer.Default.Equals(type.OriginalDefinition, symbols.EntityType);
-        }
-
-        private static List<IParameterSymbol> FilterAliasesByType(List<IParameterSymbol> aliases, ITypeSymbol targetType) {
-            var result = new List<IParameterSymbol>();
-            foreach (var alias in aliases) {
-                if (SymbolEqualityComparer.Default.Equals(alias.Type.OriginalDefinition, targetType?.OriginalDefinition)) {
-                    result.Add(alias);
-                }
+        private static bool TryGetEntitySource(IOperation receiver, StaticEcsSymbols symbols, out ISymbol source) {
+            source = null;
+            if (receiver is null) return false;
+            var unwrapped = OperationHelpers.UnwrapImplicitConversions(receiver);
+            ITypeSymbol type;
+            switch (unwrapped) {
+                case ILocalReferenceOperation local: source = local.Local; type = local.Local.Type; break;
+                case IParameterReferenceOperation param: source = param.Parameter; type = param.Parameter.Type; break;
+                default: return false;
             }
-            return result;
+            if (!SymbolEqualityComparer.Default.Equals(type.OriginalDefinition, symbols.EntityType)) {
+                source = null;
+                return false;
+            }
+            return true;
         }
 
-        private static bool ContainsParameter(List<IParameterSymbol> aliases, IParameterSymbol parameter) {
-            foreach (var alias in aliases) {
-                if (SymbolEqualityComparer.Default.Equals(alias, parameter)) return true;
+        private static bool IsRefToAlias(IOperation op, ISymbol alias) {
+            switch (op) {
+                case ILocalReferenceOperation l: return SymbolEqualityComparer.Default.Equals(l.Local, alias);
+                case IParameterReferenceOperation p: return SymbolEqualityComparer.Default.Equals(p.Parameter, alias);
+                default: return false;
             }
-            return false;
+        }
+
+        private static bool IsRebinding(IOperation op, ISymbol alias) {
+            if (op is not ISimpleAssignmentOperation a || !a.IsRef) return false;
+            if (a.Target is not ILocalReferenceOperation l) return false;
+            return SymbolEqualityComparer.Default.Equals(l.Local, alias);
+        }
+
+        private static bool IsRebindLhs(IOperation op, ISymbol alias) {
+            if (op.Parent is not ISimpleAssignmentOperation a || !a.IsRef) return false;
+            if (!ReferenceEquals(a.Target, op)) return false;
+            return IsRefToAlias(op, alias);
         }
     }
 }

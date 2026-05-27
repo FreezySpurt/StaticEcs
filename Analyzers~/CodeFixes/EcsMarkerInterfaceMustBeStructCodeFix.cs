@@ -11,15 +11,14 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace FFS.Libraries.StaticEcs.Analyzers.CodeFixes {
     /// <summary>
-    /// CodeFix for FFSECS0020 (any ECS marker interface implemented by class) and FFSECS0021
-    /// (IMultiComponent implemented by class). Both rules share the same remedy: replace the
-    /// <c>class</c> keyword with <c>struct</c>. The fix bails out when the class extends a non-object
+    /// CodeFix for FFSECS0020 — any ECS marker interface implemented by class. Replaces the
+    /// <c>class</c> keyword with <c>struct</c>. Bails out when the class extends a non-object
     /// base type (structs cannot inherit) or is <c>static</c> — the user must restructure manually.
     /// </summary>
     [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(EcsMarkerInterfaceMustBeStructCodeFix)), Shared]
     public sealed class EcsMarkerInterfaceMustBeStructCodeFix : CodeFixProvider {
         public override ImmutableArray<string> FixableDiagnosticIds { get; } =
-            ImmutableArray.Create(FFSECSIds.FFSECS0020, FFSECSIds.FFSECS0021);
+            ImmutableArray.Create(FFSECSIds.FFSECS0020);
 
         public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 

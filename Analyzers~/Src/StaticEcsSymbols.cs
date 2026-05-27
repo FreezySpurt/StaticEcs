@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 
 namespace FFS.Libraries.StaticEcs.Analyzers {
@@ -25,8 +27,7 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
         public INamedTypeSymbol IEntityType { get; private set; }
         public INamedTypeSymbol IDisableable { get; private set; }
 
-        /// <summary>All ECS marker interfaces the rule FFSECS0020 covers. IMultiComponent is here too but
-        /// the analyzer reports FFSECS0021 for it specifically.</summary>
+        /// <summary>All ECS marker interfaces the rule FFSECS0020 covers, including IMultiComponent.</summary>
         public ImmutableHashSet<INamedTypeSymbol> EcsMarkerInterfaces { get; private set; }
 
         // Containing nested types (under World&lt;TWorld&gt;).
@@ -60,7 +61,7 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
         /// <summary>FFSECS0011 allow-list — Entity.Read and Components&lt;T&gt;.Read.</summary>
         public ImmutableHashSet<ISymbol> RefReadonlyReadTargets { get; private set; }
 
-        /// <summary>FFSECS0022 dependencies — BinaryPackWriter/Reader, to identify Write/Read overrides on IMultiComponent.</summary>
+        /// <summary>FFSECS0021 dependencies — BinaryPackWriter/Reader, to identify Write/Read overrides on IMultiComponent.</summary>
         public INamedTypeSymbol BinaryPackWriter { get; private set; }
         public INamedTypeSymbol BinaryPackReader { get; private set; }
 
@@ -71,6 +72,15 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
         /// per arity) to the recommended direct Entity method name, whether to wrap in <c>!</c>, and
         /// whether each filter type argument must also implement <see cref="IDisableable"/>.</summary>
         public ImmutableDictionary<INamedTypeSymbol, IsMatchReplacement> IsMatchReplacements { get; private set; }
+
+        /// <summary>FFSECS0050/0051 — <c>World&lt;TWorld&gt;.Query</c> static entry methods (all overloads, generic and non-generic).</summary>
+        public ImmutableHashSet<ISymbol> QueryEntryMethods { get; private set; }
+
+        /// <summary>FFSECS0030/0031/0050/0051 — <c>For</c> overloads on every query-builder type (WorldQuery, WriteQuery, ReadQuery, BlockWriteQuery, BlockReadQuery, plus nested ReadQuery within each).</summary>
+        public ImmutableHashSet<ISymbol> QueryBuilderForMethods { get; private set; }
+
+        /// <summary>FFSECS0050/0051 — terminal chain methods on query-builder types (<c>Entities</c>, <c>Write</c>, <c>Read</c>, <c>WriteBlock</c>, <c>ReadBlock</c>). Names are kept as a single array constant inside <see cref="Create"/>.</summary>
+        public ImmutableHashSet<ISymbol> QueryBuilderTerminalMethods { get; private set; }
 
         public readonly struct IsMatchReplacement {
             public readonly string MethodName;
@@ -143,7 +153,49 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
             symbols.EntityIsMatch = ResolveEntityIsMatch(entityType);
             symbols.IsMatchReplacements = BuildIsMatchReplacements(compilation);
 
+            // Query entry and builder methods: resolved once so analyzers compare by ISymbol,
+            // never by method name. Builder discovery walks every type nested under World<TWorld>
+            // and keeps those classified by IsQueryBuilderType.
+            symbols.QueryEntryMethods = BuildMethodSet(symbols.WorldOpenGeneric, "Query");
+            var queryBuilderTypes = CollectQueryBuilderTypes(symbols);
+            symbols.QueryBuilderForMethods = BuildMethodSetForTypes(queryBuilderTypes, "For");
+            symbols.QueryBuilderTerminalMethods = BuildMethodSetForTypes(
+                queryBuilderTypes,
+                "Entities", "Write", "Read", "WriteBlock", "ReadBlock");
+
             return symbols;
+        }
+
+        private static List<INamedTypeSymbol> CollectQueryBuilderTypes(StaticEcsSymbols symbols) {
+            var result = new List<INamedTypeSymbol>();
+            if (symbols.WorldOpenGeneric is null) return result;
+            Walk(symbols.WorldOpenGeneric);
+            return result;
+
+            void Walk(INamedTypeSymbol parent) {
+                foreach (var nested in parent.GetTypeMembers()) {
+                    if (symbols.IsQueryBuilderType(nested)) result.Add(nested);
+                    Walk(nested);
+                }
+            }
+        }
+
+        private static ImmutableHashSet<ISymbol> BuildMethodSet(INamedTypeSymbol type, params string[] names) {
+            var builder = ImmutableHashSet.CreateBuilder<ISymbol>(SymbolEqualityComparer.Default);
+            if (type is null) return builder.ToImmutable();
+            foreach (var name in names)
+                foreach (var member in type.GetMembers(name).OfType<IMethodSymbol>())
+                    builder.Add(member.OriginalDefinition);
+            return builder.ToImmutable();
+        }
+
+        private static ImmutableHashSet<ISymbol> BuildMethodSetForTypes(List<INamedTypeSymbol> types, params string[] names) {
+            var builder = ImmutableHashSet.CreateBuilder<ISymbol>(SymbolEqualityComparer.Default);
+            foreach (var type in types)
+                foreach (var name in names)
+                    foreach (var member in type.GetMembers(name).OfType<IMethodSymbol>())
+                        builder.Add(member.OriginalDefinition);
+            return builder.ToImmutable();
         }
 
         private static ISymbol ResolveEntityIsMatch(INamedTypeSymbol entityType) {
@@ -299,7 +351,7 @@ namespace FFS.Libraries.StaticEcs.Analyzers {
             AddIfPresent(s.IComponent);
             AddIfPresent(s.ITag);
             AddIfPresent(s.IEvent);
-            AddIfPresent(s.IMultiComponent); // FFSECS0021 reports specifically for this one inside the analyzer.
+            AddIfPresent(s.IMultiComponent);
             AddIfPresent(s.IWorldType);
             AddIfPresent(s.ILinkType);
             AddIfPresent(s.ILinksType);
