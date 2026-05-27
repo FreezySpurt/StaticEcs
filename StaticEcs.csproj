@@ -12,7 +12,7 @@
         <NoWarn>$(NoWarn);IL2091</NoWarn>
         <RootNamespace>FFS.Libraries.StaticEcs</RootNamespace>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>2.2.6</Version>
+        <Version>2.2.8</Version>
         <Authors>Felid-Force-Studios</Authors>
         <Description>C# Hierarchical Inverted Bitmap ECS framework</Description>
         <Copyright>Felid-Force-Studios</Copyright>
@@ -60,43 +60,7 @@
         <None Remove="CHANGELOG_2_0_0.md"/>
         <None Remove="CHANGELOG_2_0_0_EN.md"/>
         <None Remove="CHANGELOG_2_0_0_ZH.md"/>
-        <Compile Remove="Analyzers~\**" />
-        <EmbeddedResource Remove="Analyzers~\**" />
-        <None Remove="Analyzers~\**" />
     </ItemGroup>
-
-    <Target Name="BuildAnalyzers" BeforeTargets="DispatchToInnerBuilds;BeforeBuild"
-            Condition="!Exists('Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.dll') Or !Exists('Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.CodeFixes.dll')">
-        <Exec Command="dotnet build &quot;$(MSBuildProjectDirectory)\Analyzers~\FFS.StaticEcs.Analyzers.csproj&quot; -c Release --nologo -v quiet" />
-        <Exec Command="dotnet build &quot;$(MSBuildProjectDirectory)\Analyzers~\FFS.StaticEcs.Analyzers.CodeFixes.csproj&quot; -c Release --nologo -v quiet" />
-    </Target>
-
-    <Target Name="AddDogfoodedAnalyzers" BeforeTargets="CoreCompile" DependsOnTargets="BuildAnalyzers">
-        <ItemGroup>
-            <Analyzer Include="Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.dll"
-                      Condition="Exists('Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.dll')" />
-            <Analyzer Include="Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.CodeFixes.dll"
-                      Condition="Exists('Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.CodeFixes.dll')" />
-        </ItemGroup>
-    </Target>
-
-    <ItemGroup>
-        <None Include="Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.dll"
-              Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-        <None Include="Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.CodeFixes.dll"
-              Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-    </ItemGroup>
-
-    <Target Name="CopyAnalyzerToUpm" AfterTargets="Build">
-        <ItemGroup>
-            <_AnalyzerDllsForUpm Include="Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.dll" />
-            <_AnalyzerDllsForUpm Include="Analyzers~\bin\Release\netstandard2.0\FFS.StaticEcs.Analyzers.CodeFixes.dll" />
-        </ItemGroup>
-        <Copy SourceFiles="@(_AnalyzerDllsForUpm)"
-              DestinationFolder="$(MSBuildProjectDirectory)\Analyzers"
-              SkipUnchangedFiles="true"
-              Condition="Exists('%(_AnalyzerDllsForUpm.Identity)')" />
-    </Target>
 
     <ItemGroup Condition="'$(Configuration)' == 'Debug'">
         <PackageReference Include="FFS.StaticPack.Debug" Version="1.2.6" />
