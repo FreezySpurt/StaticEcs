@@ -1052,10 +1052,8 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             /// <param name="idx">Zero-based index. Must be in range [0, <see cref="Length"/>).</param>
             /// <exception cref="StaticEcsException">Thrown in debug builds if <paramref name="idx"/> is out of range.</exception>
-            public readonly TValue this[int idx] {
-                #pragma warning disable FFSECS0010 // by-value copy is the documented purpose of this read-only wrapper
-                [MethodImpl(AggressiveInlining)] get => Multi[idx];
-                #pragma warning restore FFSECS0010
+            public readonly ref readonly TValue this[int idx] {
+                [MethodImpl(AggressiveInlining)] get => ref Multi.Get(idx);
             }
 
             /// <inheritdoc cref="Multi{TValue}.AsReadOnlySpan"/>
@@ -1068,22 +1066,18 @@ namespace FFS.Libraries.StaticEcs {
             /// </summary>
             /// <exception cref="StaticEcsException">Thrown in debug builds if the collection is empty.</exception>
             [MethodImpl(AggressiveInlining)]
-            #pragma warning disable FFSECS0010 // by-value copy is the documented purpose of this read-only wrapper
-            public readonly TValue First() {
-                return Multi.First();
+            public readonly ref readonly TValue First() {
+                return ref Multi.GetFirst();
             }
-            #pragma warning restore FFSECS0010
 
             /// <summary>
             /// Returns the last element by value (copy).
             /// </summary>
             /// <exception cref="StaticEcsException">Thrown in debug builds if the collection is empty.</exception>
             [MethodImpl(AggressiveInlining)]
-            #pragma warning disable FFSECS0010 // by-value copy is the documented purpose of this read-only wrapper
-            public readonly TValue Last() {
-                return Multi.Last();
+            public readonly ref readonly TValue Last() {
+                return ref Multi.GetLast();
             }
-            #pragma warning restore FFSECS0010
 
             /// <inheritdoc cref="Multi{TValue}.IndexOf"/>
             [MethodImpl(AggressiveInlining)]

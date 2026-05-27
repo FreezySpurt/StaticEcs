@@ -3362,7 +3362,7 @@ namespace FFS.Libraries.StaticEcs {
                 if (HasWrite) {
                     Ref(entity).Write(ref writer, entity);
                 } else if (Unmanaged) {
-                    writer.ForceWriteUnmanaged(in Ref(entity));
+                    writer.ForceWriteUnmanaged(in Read(entity));
                 }
                 #if FFS_ECS_DEBUG
                 else {
@@ -3515,7 +3515,7 @@ namespace FFS.Libraries.StaticEcs {
             internal static bool _TryGetRaw(uint eid, out IComponentOrTag value) {
                 var entity = new Entity(eid);
                 if (Instance.Has(entity)) {
-                    value = Instance.IsTag ? default : Instance.Ref(entity);
+                    value = Instance.IsTag ? default : Instance.Read(entity);
                     return true;
                 }
 

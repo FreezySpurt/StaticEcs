@@ -5,11 +5,12 @@
   <a href="./README_RU.md"><img src="https://img.shields.io/badge/RU-Русский-blue?style=flat-square" alt="Русский"></a>
   <a href="./README_ZH.md"><img src="https://img.shields.io/badge/ZH-中文-blue?style=flat-square" alt="中文"></a>
   <br><br>
-  <img src="https://img.shields.io/badge/version-2.2.6-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.8-blue?style=for-the-badge" alt="Version">
   <a href="https://www.nuget.org/packages/FFS.StaticEcs/"><img src="https://img.shields.io/badge/NuGet-FFS.StaticEcs-004880?style=for-the-badge&logo=nuget" alt="NuGet"></a>
   <a href="https://felid-force-studios.github.io/StaticEcs/en/"><img src="https://img.shields.io/badge/Docs-documentation-blueviolet?style=for-the-badge" alt="Documentation"></a>
   <a href="https://gist.github.com/blackbone/6d254a684cf580441bf58690ad9485c3"><img src="https://img.shields.io/badge/Benchmarks-results-green?style=for-the-badge" alt="Benchmarks"></a>
   <a href="https://github.com/Felid-Force-Studios/StaticEcs-Unity"><img src="https://img.shields.io/badge/Unity-module-orange?style=for-the-badge&logo=unity" alt="Unity module"></a>
+  <a href="https://github.com/Felid-Force-Studios/StaticEcs-Analyzer"><img src="https://img.shields.io/badge/Analyzer-Roslyn-9b59b6?style=for-the-badge" alt="Roslyn analyzer"></a>
   <a href="https://github.com/Felid-Force-Studios/StaticEcs-Showcase"><img src="https://img.shields.io/badge/Showcase-examples-yellow?style=for-the-badge" alt="Showcase"></a>
   <br><br>
   <a href="https://felid-force-studios.github.io/StaticEcs/en/migrationguide.html"><img src="https://img.shields.io/badge/Migration_guide-2.0.0-red?style=for-the-badge" alt="Migration guide"></a>
@@ -62,7 +63,7 @@
   * [Compiler directives](https://felid-force-studios.github.io/StaticEcs/en/features/compilerdirectives.html)
 * [Performance](https://felid-force-studios.github.io/StaticEcs/en/performance.html)
 * [Unity integration](https://felid-force-studios.github.io/StaticEcs/en/unityintegrations.html)
-* [Roslyn analyzer](https://felid-force-studios.github.io/StaticEcs/en/analyzer.html)
+* [Roslyn analyzer](https://github.com/Felid-Force-Studios/StaticEcs-Analyzer)
 * [AI Agent Integration](#ai-agent-integration)
 * [Roadmap](#roadmap)
 * [Community projects & references](#community-projects--references)
@@ -130,6 +131,8 @@ Memory is organized hierarchically: chunks (4,096 entities) → segments (256) �
 > - The framework was created for the needs of a private project and put out in open-source.
 
 # Quick start
+> 💡 For compile-time checks install [`FFS.StaticEcs.Analyzers`](https://github.com/Felid-Force-Studios/StaticEcs-Analyzer) — a separate NuGet / UPM package with a Roslyn analyzer and code-fix suite.
+
 ```csharp
 using FFS.Libraries.StaticEcs;
 
